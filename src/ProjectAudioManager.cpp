@@ -468,6 +468,12 @@ void ProjectAudioManager::OnRecord(bool altAppearance)
    // Code from CommandHandler start...
    AudacityProject *p = &mProject;
 
+   // creyes
+   int i = 7;
+   wxString Foobar;
+   Foobar.Printf(wxT("Hello I have %d cookies."), i);
+   wxMessageBox(Foobar);
+
    if (p) {
       const auto &selectedRegion = ViewInfo::Get( *p ).selectedRegion;
       double t0 = selectedRegion.t0();
