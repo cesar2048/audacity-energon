@@ -17,6 +17,8 @@ class MyFrame : public wxFrame {
 public:
 	MyFrame(const wxString& title, const wxPoint& pos, const wxSize& size);
 private:
+	NetSyncher *ns;
+
 	void OnHello(wxCommandEvent& event);
 	void OnExit(wxCommandEvent& event);
 	void OnAbout(wxCommandEvent& event);
@@ -52,16 +54,19 @@ MyFrame::MyFrame(const wxString& title, const wxPoint& pos, const wxSize& size)
 
 	wxMenuBar *menuBar = new wxMenuBar;
 	menuBar->Append(menuFile, "&File");
-	menuBar->Append(menuFile, "&Help");
+	menuBar->Append(menuHelp, "&Help");
 
 	SetMenuBar(menuBar);
 
 	CreateStatusBar();
 	SetStatusText("Welcome to wxWidgets!");
+
+	this->ns = new NetSyncher();
 }
 
 void MyFrame::OnExit(wxCommandEvent& event) {
 	Close(true);
+	delete this->ns;
 }
 
 void MyFrame::OnAbout(wxCommandEvent& event) {
@@ -71,8 +76,6 @@ void MyFrame::OnAbout(wxCommandEvent& event) {
 
 void MyFrame::OnHello(wxCommandEvent& event) {
 	wxLogMessage("Hello world from wxWidgets!");
-
-	NetSyncher ns;
-	ns.Listen();
+	ns->Listen();
 };
 

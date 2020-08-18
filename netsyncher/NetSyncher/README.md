@@ -1,0 +1,4 @@
+
+
+## References:
+* https://stackoverflow.com/questions/16883037/remove-secure-warnings-crt-secure-no-warnings-from-projects-by-default-in-vis
