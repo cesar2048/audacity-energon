@@ -167,9 +167,11 @@
   <ItemGroup>
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="NetSyncher.cpp" />
+    <ClCompile Include="WebsocketProtocol.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="NetSyncher.h" />
+    <ClInclude Include="WebsocketProtocol.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
