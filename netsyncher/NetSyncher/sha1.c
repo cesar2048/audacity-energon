@@ -176,12 +176,9 @@ void SHA1Transform(
 #endif
 }
 
-
 /* SHA1Init - Initialize new context */
 
-void SHA1Init(
-	SHA1_CTX * context
-)
+void SHA1Init(SHA1_CTX * context)
 {
 	/* SHA1 initialization constants */
 	context->state[0] = 0x67452301;

@@ -165,12 +165,14 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="base64.c" />
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="NetSyncher.cpp" />
     <ClCompile Include="sha1.c" />
     <ClCompile Include="WebsocketProtocol.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="base64.h" />
     <ClInclude Include="NetSyncher.h" />
     <ClInclude Include="sha1.h" />
     <ClInclude Include="WebsocketProtocol.h" />
