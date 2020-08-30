@@ -10,16 +10,6 @@ namespace NetSyncherTests
 	TEST_CLASS(NetSyncherTests)
 	{
 	public:
-		
-		TEST_METHOD(TestMethod1)
-		{
-			int expected = 5;
-			WebsocketProtocol ws = WebsocketProtocol();
-			int actual = ws.TestMethod();
-
-			Assert::AreEqual(expected, actual);
-		}
-
 		TEST_METHOD(TestServerKey)
 		{
 			WebsocketProtocol ws = WebsocketProtocol();
@@ -43,9 +33,9 @@ namespace NetSyncherTests
 			// write frame
 			WebsocketProtocol ws = WebsocketProtocol();
 			uint8_t outBuffer[256];
-			unsigned int written = ws.WriteFrameToBuffer(WSOpcode::BinaryFrame, inBuffer, LEN, outBuffer, 256, false);
+			unsigned int written = ws.WriteFrame(WSOpcode::BinaryFrame, inBuffer, LEN, outBuffer, 256, false);
 
-			// build expected frame
+			// build expected frame to compare
 			uint8_t expected[BYTES_HEADER + LEN];
 			expected[0] = 0x82; // fin  + binary opcode
 			expected[1] = 100;  // mask + length
@@ -54,7 +44,7 @@ namespace NetSyncherTests
 			}
 
 			Assert::AreEqual(BYTES_HEADER + LEN, written, L"Did not write correct amount of bytes");
-			for (int i = 0; i < written; i++) {
+			for (uint32_t i = 0; i < written; i++) {
 				Assert::AreEqual(expected[i], outBuffer[i]);
 			}
 		}
@@ -73,7 +63,7 @@ namespace NetSyncherTests
 			// write frame
 			WebsocketProtocol ws = WebsocketProtocol();
 			uint8_t outBuffer[256];
-			unsigned int written = ws.WriteFrameToBuffer(WSOpcode::BinaryFrame, inBuffer, LEN, outBuffer, 256, false);
+			unsigned int written = ws.WriteFrame(WSOpcode::BinaryFrame, inBuffer, LEN, outBuffer, 256, false);
 
 			// build expected frame
 			uint8_t expected[BYTES_HEADER + LEN];
@@ -86,7 +76,7 @@ namespace NetSyncherTests
 			}
 
 			Assert::AreEqual(BYTES_HEADER + LEN, written, L"Did not write correct amount of bytes");
-			for (int i = 0; i < written; i++) {
+			for (uint32_t i = 0; i < written; i++) {
 				Assert::AreEqual(expected[i], outBuffer[i]);
 			}
 		}
@@ -122,12 +112,47 @@ namespace NetSyncherTests
 			// Execute, write frame
 			WebsocketProtocol ws = WebsocketProtocol();
 			uint8_t outBuffer[OUT_LEN];
-			unsigned int written = ws.WriteFrameToBuffer(WSOpcode::BinaryFrame, inBuffer, LEN, outBuffer, OUT_LEN, false);
+			unsigned int written = ws.WriteFrame(WSOpcode::BinaryFrame, inBuffer, LEN, outBuffer, OUT_LEN, false);
 
 
 			Assert::AreEqual(BYTES_HEADER + LEN, written, L"Did not write correct amount of bytes");
-			for (int i = 0; i < written; i++) {
+			for (uint32_t i = 0; i < written; i++) {
 				Assert::AreEqual(expected[i], outBuffer[i]);
+			}
+		}
+
+		TEST_METHOD(TestReadFrame_LenLessThan125)
+		{
+			// build frame to read
+			static const size_t MSG_LEN = 100;
+			static const size_t BYTES_HEADER = 2 + 0;
+			static const size_t BYTES_MASK = 4;
+			static const size_t FRAME_LEN = BYTES_HEADER + BYTES_MASK + MSG_LEN;
+
+			uint8_t frameBuffer[BYTES_HEADER + BYTES_MASK + MSG_LEN];
+			frameBuffer[0] = 0x82; // fin   = 0x80 + opcode = 0x02
+			frameBuffer[1] = 0xE4;  // mask = 0x80 + length = 0x64
+			uint8_t* mask = frameBuffer + 2;
+			frameBuffer[2] = 51;  // mask
+			frameBuffer[3] = 246; // mask
+			frameBuffer[4] = 63;  // mask
+			frameBuffer[5] = 16;  // mask
+			for (int i = 0, j = 0; i < MSG_LEN; i++, j = (j+1) % 4) {
+				frameBuffer[BYTES_HEADER + BYTES_MASK + i] = (i & 0xFF) ^ mask[j];
+			}
+
+			// execute
+			WebsocketProtocol ws = WebsocketProtocol();
+			std::shared_ptr<WS_MSG> msg = ws.ReadFrame(frameBuffer, FRAME_LEN);
+
+			// assert
+			Assert::IsFalse(msg == nullptr, L"The message is null");
+			uint8_t expected[MSG_LEN];
+			for (int i = 0; i < MSG_LEN; i++) expected[i] = i & 0xFF;
+
+			Assert::AreEqual(MSG_LEN, msg->length, L"Frame read is not correct length");
+			for (uint32_t i = 0; i < msg->length; i++) {
+				Assert::AreEqual(expected[i], msg->buffer[i]);
 			}
 		}
 	};

@@ -11,13 +11,23 @@ uint32_t writeWord(uint8_t* outBuffer, uint32_t word, uint32_t pos) {
 	return pos;
 }
 
-int WebsocketProtocol::TestMethod() {
-	return 5;
+
+
+// -------
+
+WebsocketProtocol::WebsocketProtocol() {
+	this->bufferLength = WS_INITIAL_BUFFER;
+	this->buffer = (uint8_t*)malloc(WS_INITIAL_BUFFER);
+}
+
+WebsocketProtocol::~WebsocketProtocol() {
+	this->bufferLength = 0;
+	free(this->buffer);
 }
 
 char* WebsocketProtocol::CalculateSignature(char* clientKey) {
 	char stringToHash[128];
-	char hashResult[SHA1_RESULT_IN_BYTES + 1];
+	char hashResult[SHA1_LEN_OUT_BYTES + 1];
 
 	// generate string to SHA
 	stringToHash[0] = NULL;
@@ -28,23 +38,25 @@ char* WebsocketProtocol::CalculateSignature(char* clientKey) {
 	SHA1(hashResult, stringToHash, strlen(stringToHash));
 
 	// format the hash for printing
+#if _DEBUG
 	char *result = (char*)malloc(41);
 	size_t offset;
 	for (offset = 0; offset < 20; offset++) {
 		sprintf((result + (2 * offset)), "%02x", hashResult[offset] & 0xff);
 	}
+#endif
 
 	// convert to base64
-	int b64OutSize = b64e_size(SHA1_RESULT_IN_BYTES + 1);
+	int b64OutSize = b64e_size(SHA1_LEN_OUT_BYTES + 1);
 	char* b64String = (char*) malloc(sizeof(char) * b64OutSize);
-	b64_encode((unsigned char*) hashResult, SHA1_RESULT_IN_BYTES, (unsigned char*) b64String);
+	b64_encode((unsigned char*) hashResult, SHA1_LEN_OUT_BYTES, (unsigned char*) b64String);
 
 	return b64String;
 }
 
-uint32_t WebsocketProtocol::WriteFrameToBuffer(WSOpcode opcode, uint8_t* inBuffer, uint32_t inSize, uint8_t* outBuffer, uint32_t outSize,bool mask)
+uint32_t WebsocketProtocol::WriteFrame(WSOpcode opcode, uint8_t* inBuffer, uint32_t inSize, uint8_t* outBuffer, uint32_t outSize,bool mask)
 {
-/*
+	/*
 	  0               1               2               3
 	  0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
 	 +-+-+-+-+-------+-+-------------+-------------------------------+
@@ -63,7 +75,7 @@ uint32_t WebsocketProtocol::WriteFrameToBuffer(WSOpcode opcode, uint8_t* inBuffe
 	 + - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - +
 	 |                     Payload Data continued ...                |
 	 +---------------------------------------------------------------+
-*/
+	*/
 	// verify min buffer length
 	if (inSize < 16) {
 		return -1;
@@ -71,10 +83,13 @@ uint32_t WebsocketProtocol::WriteFrameToBuffer(WSOpcode opcode, uint8_t* inBuffe
 
 	// 7bit [+ 16 bit | + 64 bit]
 	int bytesForLength = 1;
+	int lengthOpcode = inSize;
 	if (inSize > UINT16_MAX) {
 		bytesForLength = 1 + 8;
+		lengthOpcode = 127;
 	} else if (inSize > 125) {
 		bytesForLength = 1 + 2;
+		lengthOpcode = 126;
 	}
 
 	// opcode [+ mask]
@@ -88,18 +103,20 @@ uint32_t WebsocketProtocol::WriteFrameToBuffer(WSOpcode opcode, uint8_t* inBuffe
 		isFinal = 1;
 	}
 
+	// encode fin, opcode, mask bits and length
 	int pos = 0;
 	outBuffer[pos++] = opcode | (isFinal << 7);
-	outBuffer[pos++] = (mask << 7) | (inSize <= 125 ? inSize : (inSize < UINT16_MAX ? 126 : 127));
+	outBuffer[pos++] = (mask << 7) | lengthOpcode;
 
+	// encode length (extended)
 	if (inSize > 125) {
 		outBuffer[pos++] = inSize & 0xFF;
 		outBuffer[pos++] = (inSize << 8) & 0xFF;
 		if (inSize > UINT16_MAX) {
 			outBuffer[pos++] = (inSize << 16) & 0xFF;
 			outBuffer[pos++] = (inSize << 24) & 0xFF;
-			// zeroing the last 4 bytes as we are only creating
-			// frames whose length needs as much as 32 bit
+			// zeroing the last 4 bytes, given that with the first 4 bytes
+			// (32 bit) we are talking about a 4Gb memory buffer already
 			outBuffer[pos++] = 0;
 			outBuffer[pos++] = 0;
 			outBuffer[pos++] = 0;
@@ -112,11 +129,58 @@ uint32_t WebsocketProtocol::WriteFrameToBuffer(WSOpcode opcode, uint8_t* inBuffe
 		pos = writeWord(outBuffer, maskValue, pos);
 	}
 
-	for (int i = 0; i < inSize; i++) {
+	for (uint32_t i = 0; i < inSize; i++) {
 		outBuffer[pos++] = inBuffer[i];
 	}
 
 	return pos;
 }
 
+std::shared_ptr<WS_MSG> WebsocketProtocol::ReadFrame(uint8_t * buffer, uint32_t bufferLength)
+{
+	// https://stackoverflow.com/questions/22220512/check-for-null-in-stdshared-ptr
+
+	std::shared_ptr<WS_MSG> frame = std::make_shared<WS_MSG>();
+	// frame->buffer = std::shared_ptr<uint8_t*>(new uint8_t[20], std::default_delete<uint8_t[]>() );
+	// https://stackoverflow.com/questions/13061979/shared-ptr-to-an-array-should-it-be-used
+
+	uint32_t pos = 0;
+	bool isFin		= buffer[pos] & 0x80;
+	WSOpcode opCode = WSOpcode(buffer[pos++] & 0x07);
+
+	bool isMasked		= buffer[pos] & 0x80;
+	uint8_t lengthShort = (uint8_t) (buffer[pos++] & 0x7F);
+	uint32_t length     = 0;
+	if (lengthShort <= 125) {
+		length = lengthShort;
+	} else {
+		length = buffer[pos++];
+		length += buffer[pos++] << 8 & 0xFF;
+		if (lengthShort == 127) {
+			length += buffer[pos++] << 16 & 0xFF;
+			length += buffer[pos++] << 24 & 0xFF;
+			// ignore the last 4 bytes of length
+			pos += 4;
+		}
+	}
+
+	
+	uint8_t* mask = buffer + pos;
+	if (isMasked) {
+		pos += 4;
+	}
+
+	for (uint32_t i = pos, j = 0; i < bufferLength; i++, j = (j + 1) % 4) {
+		this->buffer[i - pos] = buffer[i];
+		if (isMasked) {
+			this->buffer[i - pos] ^= mask[j];
+		}
+	}
+
+	frame->buffer = this->buffer;
+	frame->length = length;
+	frame->opcode = opCode;
+
+	return frame;
+}
 
