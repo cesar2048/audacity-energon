@@ -17,8 +17,8 @@ class HttpRequestMsg
 {
 public:
 	map<string, string> headers;
-	string host;
 	string uri;
+	string method;
 };
 
 class HttpProtocol
