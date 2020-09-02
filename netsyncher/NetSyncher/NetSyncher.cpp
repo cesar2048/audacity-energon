@@ -36,7 +36,7 @@ void HttpServer::Listen(int port) {
 	addr.Service(port);
 
 	this->server = new wxSocketServer(addr, wxSOCKET_NONE);
-	this->serverThread = new std::thread(&HttpServer::ListenLoop, this, port); //https://stackoverflow.com/a/10673671
+	this->serverThread = new std::thread(&HttpServer::ListenLoop, this, port); // https://stackoverflow.com/a/10673671
 }
 
 void HttpServer::ListenLoop(int port) {

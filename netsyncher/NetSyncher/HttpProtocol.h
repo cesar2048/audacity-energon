@@ -5,6 +5,14 @@
 
 using namespace std;
 
+class InputStream {
+public:
+	/*
+	Reads up to len bytes into buffer. Returns the number of read bytes
+	*/
+	virtual uint32_t read(uint8_t* buffer, uint32_t len) = 0;
+};
+
 class HttpRequestMsg
 {
 public:
@@ -17,8 +25,9 @@ class HttpProtocol
 {
 public:
 	/*
-	https://stackoverflow.com/questions/14544043/operand-types-are-incompatible-char-and-const-char
+	Pass the argument by reference
+	https://stackoverflow.com/a/14548993
 	*/
-	HttpRequestMsg readRequest(const char* request);
+	HttpRequestMsg readRequest(InputStream *iStream);
 };
 
