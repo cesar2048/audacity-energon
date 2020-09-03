@@ -46,6 +46,25 @@ namespace NetSyncherTests
 
 	TEST_CLASS(HttpProtocolTests)
 	{
+		void runTestAsserts(InputStream &iss) {
+			HttpProtocol http = HttpProtocol();
+
+			// execute
+			
+			HttpRequestMsg req = http.readRequest(&iss);
+
+			// assert
+			map<string, string>::iterator it;
+
+			it = req.headers.find("accept");
+			Assert::IsFalse(it == req.headers.end(), L"\"Accept\" header not found");
+			Assert::AreEqual(it->second, string("application/json"));
+
+			it = req.headers.find("host");
+			Assert::IsFalse(it == req.headers.end(), L"\"Accept\" header not found");
+			Assert::AreEqual(it->second, string("www.w3.org"));
+		}
+
 	public:
 		TEST_METHOD(Test_ReqStandard)
 		{
@@ -55,22 +74,10 @@ namespace NetSyncherTests
 				"Host: www.w3.org"						CR_LF
 				"Accept: application/json"				CR_LF
 				CR_LF;
-			HttpProtocol http = HttpProtocol();
-
-			// execute
+			
 			StrInputStream iss(sampleGetReq);
-			HttpRequestMsg req = http.readRequest(&iss);
-			
-			// assert
-			map<string, string>::iterator it;
+			this->runTestAsserts(iss);
 
-			it = req.headers.find("accept");
-			Assert::IsFalse(it == req.headers.end(), L"\"Accept\" header not found");
-			Assert::AreEqual(it->second, string("application/json"));
-			
-			it = req.headers.find("host");
-			Assert::IsFalse(it == req.headers.end(), L"\"Accept\" header not found");
-			Assert::AreEqual(it->second, string("www.w3.org"));
 		}
 
 		TEST_METHOD(Test_ReqWithInitialSapces)
@@ -85,22 +92,8 @@ namespace NetSyncherTests
 				CR_LF
 				;
 
-			HttpProtocol http = HttpProtocol();
-
-			// execute
 			StrInputStream iss(sampleGetToTestWellBehavedServers);
-			HttpRequestMsg req = http.readRequest(&iss);
-
-			// assert
-			map<string, string>::iterator it;
-
-			it = req.headers.find("accept");
-			Assert::IsFalse(it == req.headers.end(), L"\"Accept\" header not found");
-			Assert::AreEqual(it->second, string("application/json"));
-
-			it = req.headers.find("host");
-			Assert::IsFalse(it == req.headers.end(), L"\"Accept\" header not found");
-			Assert::AreEqual(it->second, string("www.w3.org"));
+			this->runTestAsserts(iss);
 		}
 	};
 }
