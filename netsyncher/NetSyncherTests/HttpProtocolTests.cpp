@@ -9,15 +9,6 @@ using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 #define CR_LF "\r\n"
 
 
-// https://tools.ietf.org/html/rfc2616#section-4.1
-static const char* sampleGetToTestWellBehavedServers =
-CR_LF CR_LF
-"GET /pub/WWW/TheProject.html HTTP/1.1" CR_LF
-"Host: www.w3.org"						CR_LF
-"Accept: application/json"				CR_LF
-CR_LF
-;
-
 namespace NetSyncherTests
 {
 	class StrInputStream : public InputStream {
@@ -56,7 +47,7 @@ namespace NetSyncherTests
 	TEST_CLASS(HttpProtocolTests)
 	{
 	public:
-		TEST_METHOD(TestServerKey)
+		TEST_METHOD(Test_ReqStandard)
 		{
 			// prepare
 			static const char* sampleGetReq =
@@ -77,6 +68,36 @@ namespace NetSyncherTests
 			Assert::IsFalse(it == req.headers.end(), L"\"Accept\" header not found");
 			Assert::AreEqual(it->second, string("application/json"));
 			
+			it = req.headers.find("host");
+			Assert::IsFalse(it == req.headers.end(), L"\"Accept\" header not found");
+			Assert::AreEqual(it->second, string("www.w3.org"));
+		}
+
+		TEST_METHOD(Test_ReqWithInitialSapces)
+		{
+
+			// https://tools.ietf.org/html/rfc2616#section-4.1
+			static const char* sampleGetToTestWellBehavedServers =
+				CR_LF CR_LF
+				"GET /pub/WWW/TheProject.html HTTP/1.1" CR_LF
+				"Host: www.w3.org"						CR_LF
+				"Accept: application/json"				CR_LF
+				CR_LF
+				;
+
+			HttpProtocol http = HttpProtocol();
+
+			// execute
+			StrInputStream iss(sampleGetToTestWellBehavedServers);
+			HttpRequestMsg req = http.readRequest(&iss);
+
+			// assert
+			map<string, string>::iterator it;
+
+			it = req.headers.find("accept");
+			Assert::IsFalse(it == req.headers.end(), L"\"Accept\" header not found");
+			Assert::AreEqual(it->second, string("application/json"));
+
 			it = req.headers.find("host");
 			Assert::IsFalse(it == req.headers.end(), L"\"Accept\" header not found");
 			Assert::AreEqual(it->second, string("www.w3.org"));
