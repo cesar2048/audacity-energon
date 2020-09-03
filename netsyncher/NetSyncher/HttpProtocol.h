@@ -21,6 +21,11 @@ public:
 	string method;
 };
 
+class HttpResponseMsg
+{
+
+};
+
 class HttpProtocol
 {
 public:

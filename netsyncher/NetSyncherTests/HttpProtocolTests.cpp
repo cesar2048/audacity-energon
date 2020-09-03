@@ -5,9 +5,7 @@
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
-// "HTTP/1.1 200 ok\r\nContent-Type: application/json\r\n\r\n{\"Hello\":\"world\"}"
 #define CR_LF "\r\n"
-
 
 namespace NetSyncherTests
 {
@@ -46,13 +44,7 @@ namespace NetSyncherTests
 
 	TEST_CLASS(HttpProtocolTests)
 	{
-		void runTestAsserts(InputStream &iss) {
-			HttpProtocol http = HttpProtocol();
-
-			// execute
-			
-			HttpRequestMsg req = http.readRequest(&iss);
-
+		void runTestAsserts(HttpRequestMsg req) {
 			// assert
 			map<string, string>::iterator it;
 
@@ -75,9 +67,13 @@ namespace NetSyncherTests
 				"Accept: application/json"				CR_LF
 				CR_LF;
 			
+			// execute
 			StrInputStream iss(sampleGetReq);
-			this->runTestAsserts(iss);
+			HttpProtocol http = HttpProtocol();
+			HttpRequestMsg req = http.readRequest(&iss);
 
+			// assert
+			this->runTestAsserts(req);
 		}
 
 		TEST_METHOD(Test_ReqWithInitialSapces)
@@ -90,10 +86,37 @@ namespace NetSyncherTests
 				"Host: www.w3.org"						CR_LF
 				"Accept: application/json"				CR_LF
 				CR_LF
-				;
+			;
 
+			// execute
 			StrInputStream iss(sampleGetToTestWellBehavedServers);
-			this->runTestAsserts(iss);
+			HttpProtocol http = HttpProtocol();
+			HttpRequestMsg req = http.readRequest(&iss);
+
+			// assert
+			this->runTestAsserts(req);
+		}
+
+		int generateResponse(char *buffer, int32_t bufferLength, const char *body) {
+			static const char* resTemplate = "HTTP/1.1 200 ok" CR_LF
+				"Content-Type: application/json" CR_LF
+				"Content-Length: %i" CR_LF
+				CR_LF
+				"%s"
+				;
+			
+			return sprintf_s(buffer, bufferLength, resTemplate, strlen(body), body);
+		}
+
+		TEST_METHOD(Test_ResDefault)
+		{
+			char buffer[2048];
+			this->generateResponse(buffer, 2048, "{\"Hello\":\"world\"}");
+
+			HttpResponseMsg res;
+			res.write("{\"Hello\":\"world\"}");
+
+			HttpProtocol http = HttpProtocol();
 		}
 	};
 }
