@@ -5,6 +5,7 @@
 #endif
 
 #include "NetSyncher.h"
+#include "HttpProtocol.h"
 
 NetSyncher::NetSyncher() {
 }
@@ -15,6 +16,32 @@ void NetSyncher::Listen() {
 	Foobar.Printf(wxT("Hello I have %d cookies."), 10);
 	wxMessageBox(Foobar);
 }
+
+// ------------
+class WxInputStream : public InputStream {
+private:
+	wxSocketBase *socket;
+	int lastRead;
+public:
+	WxInputStream(wxSocketBase *socket) {
+		this->socket = socket;
+		this->lastRead = 0;
+	}
+	// Heredado vía InputStream
+	virtual uint32_t read(uint8_t * buffer, uint32_t len) override
+	{
+		if (lastRead == -1) {
+			lastRead = 0;
+			return 0;
+		}
+		socket->Read(buffer, len);
+		int read = socket->LastReadCount();
+		if (read < len) {
+			lastRead = -1;
+		}
+		return read;
+	}
+};
 
 // ---------------------------------
 
@@ -45,10 +72,10 @@ void HttpServer::ListenLoop(int port) {
 
 		wxSocketBase socket;
 		if (this->server->AcceptWith(socket, false)) {
-			char buffer[1024];
-			socket.Read(buffer, 1024);
+			WxInputStream wis(&socket);
+			HttpProtocol hp;
 
-			int i = socket.LastReadCount();
+			hp.readRequest(&wis);
 
 			char response[] = "HTTP/1.1 200 ok\r\nContent-Type: application/json\r\n\r\n{\"Hello\":\"world\"}";
 			socket.Write(response, strlen(response));

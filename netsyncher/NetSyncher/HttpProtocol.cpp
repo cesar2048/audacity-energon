@@ -69,7 +69,7 @@ HttpRequestMsg HttpProtocol::readRequest(InputStream *iStream)
 	http://www.cplusplus.com/reference/sstream/stringbuf/
 	https://stackoverflow.com/questions/772355/how-to-inherit-from-stdostream
 	*/
-	#define BUFFER_LEN 32
+	#define BUFFER_LEN 2048
 
 	HttpRequestMsg msg = HttpRequestMsg();
 
@@ -103,8 +103,6 @@ HttpRequestMsg HttpProtocol::readRequest(InputStream *iStream)
 			msg.headers.insert_or_assign(key, val);
 		}
 	}
-
-
 
 	return msg;
 }
