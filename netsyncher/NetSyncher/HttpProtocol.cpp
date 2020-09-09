@@ -54,7 +54,10 @@ static inline std::vector<string> split(std::string &s, char byChar) {
 }
 
 
-HttpRequestMsg HttpProtocol::readRequest(InputStream *iStream)
+HttpProtocol::HttpProtocol(IOStream *iostream) :iostream(iostream) {
+}
+
+HttpRequestMsg HttpProtocol::readRequest()
 {
 	/*
 	https://stackoverflow.com/questions/17290144/stdio-vs-iostream
@@ -69,7 +72,6 @@ HttpRequestMsg HttpProtocol::readRequest(InputStream *iStream)
 	http://www.cplusplus.com/reference/sstream/stringbuf/
 	https://stackoverflow.com/questions/772355/how-to-inherit-from-stdostream
 	*/
-	#define BUFFER_LEN 2048
 
 	HttpRequestMsg msg = HttpRequestMsg();
 
@@ -78,7 +80,7 @@ HttpRequestMsg HttpProtocol::readRequest(InputStream *iStream)
 	uint32_t read = 1;
 
 	while (read != 0) {
-		read = iStream->read((uint8_t*)buffer, BUFFER_LEN);
+		read = this->iostream->read((uint8_t*)buffer, BUFFER_LEN);
 		if (read) {
 			text = text.append(buffer, read);
 		}
@@ -106,3 +108,51 @@ HttpRequestMsg HttpProtocol::readRequest(InputStream *iStream)
 
 	return msg;
 }
+
+void HttpProtocol::sendResponse(HttpResponseMsg & msg)
+{
+
+}
+
+HttpResponseMsg::HttpResponseMsg()
+{
+	this->buffer = (uint8_t*)malloc(BUFFER_LEN);
+	this->buffer[0] = 0;
+	this->buffSize = BUFFER_LEN;
+}
+
+HttpResponseMsg::~HttpResponseMsg()
+{
+	free(this->buffer);
+}
+
+bool HttpResponseMsg::ensureEnoughSpace(uint32_t desiredSize)
+{
+	if (this->buffSize < desiredSize) {
+		void* ptr = realloc(this->buffer, this->buffSize * 2);
+		if (!ptr) {
+			return false;
+		}
+		this->buffer = (uint8_t*)ptr;
+		this->buffSize *= 2;
+	}
+	return true;
+}
+
+bool HttpResponseMsg::write(char * str)
+{
+	int len = strlen(str) + 1; // + null char
+	bool hasEnoughSpace = this->ensureEnoughSpace(this->buffSize + len);
+	if (!hasEnoughSpace) {
+		return false;
+	}
+
+	strcat_s((char*) this->buffer, this->buffSize, str);
+}
+
+uint8_t * HttpResponseMsg::_getBuffer(uint32_t * outSize)
+{
+	*outSize = this->buffSize;
+	return this->buffer;
+}
+

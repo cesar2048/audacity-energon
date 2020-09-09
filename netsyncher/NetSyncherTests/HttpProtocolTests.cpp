@@ -9,36 +9,59 @@ using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
 namespace NetSyncherTests
 {
-	class StrInputStream : public InputStream {
-	private:
-		char* str;
-		int pos;
+	/* Auxiliary class to test to provide an in-memory IOStream */
+	class StrInputStream : public IOStream {
 	public:
+		char* inputBuffer;
+		int inCursor;
+		char *outputBuffer;
+		int outCursor;
+
 		StrInputStream(const char *str) {
 			size_t bufferSize = strlen(str) + 1;
 
-			this->pos = 0;
-			this->str = (char*)malloc(bufferSize);
+			this->inCursor = 0;
+			this->outCursor = 0;
+			this->inputBuffer = (char*)malloc(bufferSize);
 
-			strcpy_s(this->str, bufferSize, str);
+			strcpy_s(this->inputBuffer, bufferSize, str);
 		}
-		StrInputStream() {
-			if (this->str) free(this->str);
+
+		~StrInputStream() {
+			if (this->inputBuffer) {
+				free(this->inputBuffer);
+			}
 		}
-		// Heredado vía InputStream
+
+		// Imlements the read interface
 		virtual uint32_t read(uint8_t * buffer, uint32_t len) override
 		{
-			char* str = this->str + this->pos;
+			char* str = this->inputBuffer + this->inCursor;
 
 			uint32_t strLen = strlen(str);
 			uint32_t min = (len > strLen) ? strLen : len;
 
 			if (min > 0) {
 				memcpy(buffer, str, min);
-				this->pos += min;
+				this->inCursor += min;
 			}
 			
 			return min;
+		}
+
+		// Implements write interface
+		virtual uint32_t write(uint8_t* buffer, uint32_t len) override
+		{
+			if (this->outCursor == 0) {
+				this->outputBuffer = (char*)malloc(len);
+				memcpy_s(this->outputBuffer, len, buffer, len);
+				this->outCursor = len;
+				return len;
+			} else {
+				this->outputBuffer = (char*) realloc(this->outputBuffer, this->outCursor + len);
+				memcpy_s(this->outputBuffer + this->outCursor, len, buffer, len);
+				this->outCursor += len;
+			}
 		}
 	};
 
@@ -57,6 +80,13 @@ namespace NetSyncherTests
 			Assert::AreEqual(it->second, string("www.w3.org"));
 		}
 
+		void compareBuffers(uint8_t* expected, uint32_t expectedLen, uint8_t* actual, uint32_t actualLen) {
+			Assert::AreEqual(expectedLen, actualLen, L"Did not write correct amount of bytes");
+			for (uint32_t i = 0; i < actualLen; i++) {
+				Assert::AreEqual(expected[i], actual[i]);
+			}
+		}
+
 	public:
 		TEST_METHOD(Test_ReqStandard)
 		{
@@ -69,8 +99,8 @@ namespace NetSyncherTests
 			
 			// execute
 			StrInputStream iss(sampleGetReq);
-			HttpProtocol http = HttpProtocol();
-			HttpRequestMsg req = http.readRequest(&iss);
+			HttpProtocol http = HttpProtocol(&iss);
+			HttpRequestMsg req = http.readRequest();
 
 			// assert
 			this->runTestAsserts(req);
@@ -90,8 +120,8 @@ namespace NetSyncherTests
 
 			// execute
 			StrInputStream iss(sampleGetToTestWellBehavedServers);
-			HttpProtocol http = HttpProtocol();
-			HttpRequestMsg req = http.readRequest(&iss);
+			HttpProtocol http = HttpProtocol(&iss);
+			HttpRequestMsg req = http.readRequest();
 
 			// assert
 			this->runTestAsserts(req);
@@ -111,12 +141,16 @@ namespace NetSyncherTests
 		TEST_METHOD(Test_ResDefault)
 		{
 			char buffer[2048];
-			this->generateResponse(buffer, 2048, "{\"Hello\":\"world\"}");
+			int expectedLen = this->generateResponse(buffer, 2048, "{\"Hello\":\"world\"}");
+			StrInputStream iss("");
 
+			// execute
+			HttpProtocol http = HttpProtocol(&iss);
 			HttpResponseMsg res;
 			res.write("{\"Hello\":\"world\"}");
+			http.sendResponse(res);
 
-			HttpProtocol http = HttpProtocol();
+			compareBuffers((uint8_t*) buffer, expectedLen, (uint8_t*) iss.outputBuffer, iss.outCursor);
 		}
 	};
 }

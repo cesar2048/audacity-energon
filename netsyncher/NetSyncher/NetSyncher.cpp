@@ -18,7 +18,7 @@ void NetSyncher::Listen() {
 }
 
 // ------------
-class WxInputStream : public InputStream {
+class WxInputStream : public IOStream {
 private:
 	wxSocketBase *socket;
 	int lastRead;
@@ -40,6 +40,12 @@ public:
 			lastRead = -1;
 		}
 		return read;
+	}
+
+	// Heredado vía IOStream
+	virtual uint32_t write(uint8_t * buffer, uint32_t len) override
+	{
+		return uint32_t();
 	}
 };
 
@@ -73,9 +79,8 @@ void HttpServer::ListenLoop(int port) {
 		wxSocketBase socket;
 		if (this->server->AcceptWith(socket, false)) {
 			WxInputStream wis(&socket);
-			HttpProtocol hp;
-
-			hp.readRequest(&wis);
+			HttpProtocol hp(&wis);
+			hp.readRequest();
 
 			char response[] = "HTTP/1.1 200 ok\r\nContent-Type: application/json\r\n\r\n{\"Hello\":\"world\"}";
 			socket.Write(response, strlen(response));
