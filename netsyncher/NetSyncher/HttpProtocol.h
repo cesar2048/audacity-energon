@@ -36,9 +36,9 @@ public:
 };
 
 /**
-Response message corresponding to a request
+MemBuffer
 */
-class HttpResponseMsg
+class MemBuffer
 {
 	uint8_t* buffer;
 	uint32_t buffSize;
@@ -47,23 +47,37 @@ class HttpResponseMsg
 	bool ensureEnoughSpace(uint32_t desiredLength);
 
 public:
-	HttpResponseMsg();
-	~HttpResponseMsg();
-
-	map<string, string> headers;
-	int statusCode = 200;
+	MemBuffer();
+	MemBuffer(MemBuffer&);
+	~MemBuffer();
 
 	// adds a string to the response (buffered)
 	// void write(string str);
 	
 	// adds a zero terminated string to the response (buffered)
 	// returns true if the operation succeded
-	bool write(char *str);
+	bool write(const char *str);
 
 	// adds a byte array to the response (buffered)
-	// void write(uint8_t* buffer, uint32_t len);
+	bool write(uint8_t* buffer, uint32_t len);
+
+	uint32_t size();
 
 	uint8_t* _getBuffer(uint32_t *outSize);
+};
+
+/*
+Http response message
+*/
+class HttpResponseMsg
+{
+public:
+	MemBuffer buffer;
+	map<string, string> headers;
+	int statusCode = 200;
+
+	bool write(char *str);
+	void setHeader(char* key, char* value);
 };
 
 /**
@@ -91,3 +105,4 @@ public:
 	void sendResponse(HttpResponseMsg &msg);
 
 };
+

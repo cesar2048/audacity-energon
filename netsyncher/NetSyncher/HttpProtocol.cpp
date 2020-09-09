@@ -54,6 +54,9 @@ static inline std::vector<string> split(std::string &s, char byChar) {
 }
 
 
+// -------------- HttpProtocol -----------------------------
+
+
 HttpProtocol::HttpProtocol(IOStream *iostream) :iostream(iostream) {
 }
 
@@ -109,24 +112,61 @@ HttpRequestMsg HttpProtocol::readRequest()
 	return msg;
 }
 
-void HttpProtocol::sendResponse(HttpResponseMsg & msg)
-{
 
+// -------------- HttpProtocol -----------------------------
+
+
+void HttpProtocol::sendResponse(HttpResponseMsg& msg)
+{
+	char temporaryLine[BUFFER_LEN];
+	uint32_t contentLength;
+	uint8_t* contentBuffer = msg.buffer._getBuffer(&contentLength);
+
+	// preparation
+	sprintf_s(temporaryLine, BUFFER_LEN, "%d", contentLength);
+	msg.headers["Content-Length"] = string(temporaryLine);
+
+	// status line
+	sprintf_s(temporaryLine, BUFFER_LEN, "HTTP/1.1 %d %s\r\n", msg.statusCode, "OK");
+	this->iostream->write((uint8_t*) temporaryLine, strlen(temporaryLine));
+
+	// headers
+	map<string,string>::iterator it;
+	for (it = msg.headers.begin(); it != msg.headers.end(); it++) {
+		const char* key = (*it).first.c_str();
+		const char* val = (*it).second.c_str();
+		sprintf_s(temporaryLine, BUFFER_LEN, "%s: %s\r\n", key, val);
+		this->iostream->write((uint8_t*)temporaryLine, strlen(temporaryLine));
+	}
+
+	this->iostream->write(contentBuffer, contentLength);
 }
 
-HttpResponseMsg::HttpResponseMsg()
+
+// -------------- MemBuffer -----------------------------
+
+
+MemBuffer::MemBuffer()
 {
 	this->buffer = (uint8_t*)malloc(BUFFER_LEN);
 	this->buffer[0] = 0;
 	this->buffSize = BUFFER_LEN;
 }
 
-HttpResponseMsg::~HttpResponseMsg()
+MemBuffer::MemBuffer(MemBuffer &original)
+{
+	this->buffSize = original.buffSize;
+	this->buffer = (uint8_t*)malloc(this->buffSize);
+
+	memcpy(this->buffer, original.buffer, original.buffSize);
+}
+
+MemBuffer::~MemBuffer()
 {
 	free(this->buffer);
 }
 
-bool HttpResponseMsg::ensureEnoughSpace(uint32_t desiredSize)
+bool MemBuffer::ensureEnoughSpace(uint32_t desiredSize)
 {
 	if (this->buffSize < desiredSize) {
 		void* ptr = realloc(this->buffer, this->buffSize * 2);
@@ -139,20 +179,44 @@ bool HttpResponseMsg::ensureEnoughSpace(uint32_t desiredSize)
 	return true;
 }
 
-bool HttpResponseMsg::write(char * str)
+bool MemBuffer::write(const char * str)
 {
 	int len = strlen(str) + 1; // + null char
-	bool hasEnoughSpace = this->ensureEnoughSpace(this->buffSize + len);
+	return this->write((uint8_t*) str, len);
+}
+
+bool MemBuffer::write(uint8_t * buffer, uint32_t len)
+{
+	uint32_t spaceNeeded = this->buffUsed + len;
+	bool hasEnoughSpace = this->ensureEnoughSpace(spaceNeeded);
 	if (!hasEnoughSpace) {
 		return false;
 	}
 
-	strcat_s((char*) this->buffer, this->buffSize, str);
+	uint32_t available = this->buffSize - this->buffUsed;
+	uint8_t* ptrStart = this->buffer + this->buffUsed;
+
+	memcpy_s(ptrStart, available, buffer, len);
+	this->buffUsed += len;
 }
 
-uint8_t * HttpResponseMsg::_getBuffer(uint32_t * outSize)
+uint32_t MemBuffer::size()
 {
-	*outSize = this->buffSize;
+	return this->buffUsed;
+}
+
+uint8_t * MemBuffer::_getBuffer(uint32_t * outSize)
+{
+	*outSize = this->buffUsed;
 	return this->buffer;
 }
 
+bool HttpResponseMsg::write(char * str)
+{
+	return this->buffer.write(str);
+}
+
+void HttpResponseMsg::setHeader(char* key, char* value)
+{
+	this->headers[key] = value;
+}

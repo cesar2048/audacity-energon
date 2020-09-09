@@ -14,14 +14,12 @@ namespace NetSyncherTests
 	public:
 		char* inputBuffer;
 		int inCursor;
-		char *outputBuffer;
-		int outCursor;
+		MemBuffer outBuffer;
 
 		StrInputStream(const char *str) {
 			size_t bufferSize = strlen(str) + 1;
 
 			this->inCursor = 0;
-			this->outCursor = 0;
 			this->inputBuffer = (char*)malloc(bufferSize);
 
 			strcpy_s(this->inputBuffer, bufferSize, str);
@@ -52,16 +50,11 @@ namespace NetSyncherTests
 		// Implements write interface
 		virtual uint32_t write(uint8_t* buffer, uint32_t len) override
 		{
-			if (this->outCursor == 0) {
-				this->outputBuffer = (char*)malloc(len);
-				memcpy_s(this->outputBuffer, len, buffer, len);
-				this->outCursor = len;
+			bool result = this->outBuffer.write(buffer, len);
+			if (result) {
 				return len;
-			} else {
-				this->outputBuffer = (char*) realloc(this->outputBuffer, this->outCursor + len);
-				memcpy_s(this->outputBuffer + this->outCursor, len, buffer, len);
-				this->outCursor += len;
 			}
+			return 0;
 		}
 	};
 
@@ -128,14 +121,15 @@ namespace NetSyncherTests
 		}
 
 		int generateResponse(char *buffer, int32_t bufferLength, const char *body) {
-			static const char* resTemplate = "HTTP/1.1 200 ok" CR_LF
-				"Content-Type: application/json" CR_LF
+			static const char* resTemplate = "HTTP/1.1 200 OK" CR_LF
 				"Content-Length: %i" CR_LF
+				"Content-Type: application/json" CR_LF
 				CR_LF
 				"%s"
 				;
 			
-			return sprintf_s(buffer, bufferLength, resTemplate, strlen(body), body);
+			uint32_t length = sprintf_s(buffer, bufferLength, resTemplate, strlen(body), body);
+			return length - 1; // don't care about ending NULL
 		}
 
 		TEST_METHOD(Test_ResDefault)
@@ -147,10 +141,13 @@ namespace NetSyncherTests
 			// execute
 			HttpProtocol http = HttpProtocol(&iss);
 			HttpResponseMsg res;
+			res.setHeader("Content-Type", "application/json");
 			res.write("{\"Hello\":\"world\"}");
 			http.sendResponse(res);
 
-			compareBuffers((uint8_t*) buffer, expectedLen, (uint8_t*) iss.outputBuffer, iss.outCursor);
+			uint32_t outLen;
+			uint8_t* outBuffer = iss.outBuffer._getBuffer(&outLen);
+			compareBuffers((uint8_t*)buffer, expectedLen, outBuffer, outLen);
 		}
 	};
 }
