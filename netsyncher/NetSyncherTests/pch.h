@@ -6,7 +6,9 @@
 
 #ifndef PCH_H
 #define PCH_H
+#include <string>
 
 // agregue aquí los encabezados que desea precompilar
+void compareBuffers(uint8_t* expected, uint32_t expectedLen, uint8_t* actual, uint32_t actualLen);
 
 #endif //PCH_H

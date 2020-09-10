@@ -56,6 +56,7 @@ namespace NetSyncherTests
 			}
 			return 0;
 		}
+
 	};
 
 	TEST_CLASS(HttpProtocolTests)
@@ -71,13 +72,6 @@ namespace NetSyncherTests
 			it = req.headers.find("host");
 			Assert::IsFalse(it == req.headers.end(), L"\"Accept\" header not found");
 			Assert::AreEqual(it->second, string("www.w3.org"));
-		}
-
-		void compareBuffers(uint8_t* expected, uint32_t expectedLen, uint8_t* actual, uint32_t actualLen) {
-			Assert::AreEqual(expectedLen, actualLen, L"Did not write correct amount of bytes");
-			for (uint32_t i = 0; i < actualLen; i++) {
-				Assert::AreEqual(expected[i], actual[i]);
-			}
 		}
 
 	public:
@@ -129,7 +123,7 @@ namespace NetSyncherTests
 				;
 			
 			uint32_t length = sprintf_s(buffer, bufferLength, resTemplate, strlen(body), body);
-			return length - 1; // don't care about ending NULL
+			return length;
 		}
 
 		TEST_METHOD(Test_ResDefault)
@@ -147,6 +141,7 @@ namespace NetSyncherTests
 
 			uint32_t outLen;
 			uint8_t* outBuffer = iss.outBuffer._getBuffer(&outLen);
+
 			compareBuffers((uint8_t*)buffer, expectedLen, outBuffer, outLen);
 		}
 	};

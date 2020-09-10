@@ -17,9 +17,15 @@ public:
 
 	/**
 	Attempts to write as much as len bytes to the stream.
-	Returns the number of bytes actually writte.
+	Returns the number of bytes actually written
 	*/
 	virtual uint32_t write(uint8_t* buffer, uint32_t len) = 0;
+
+	/**
+	Attempts to write string to the stream
+	returns the number of bytes actually written
+	*/
+	virtual uint32_t write(const char* string);
 };
 
 
@@ -69,14 +75,12 @@ public:
 /*
 Http response message
 */
-class HttpResponseMsg
+class HttpResponseMsg : public MemBuffer
 {
 public:
-	MemBuffer buffer;
 	map<string, string> headers;
 	int statusCode = 200;
 
-	bool write(char *str);
 	void setHeader(char* key, char* value);
 };
 

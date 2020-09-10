@@ -54,6 +54,17 @@ static inline std::vector<string> split(std::string &s, char byChar) {
 }
 
 
+// -------------- IOStream -------------------------
+
+
+uint32_t IOStream::write(const char * string)
+{
+	uint32_t len = strlen(string);
+	uint32_t res = this->write((uint8_t*)string, len);
+	return res;
+}
+
+
 // -------------- HttpProtocol -----------------------------
 
 
@@ -120,7 +131,7 @@ void HttpProtocol::sendResponse(HttpResponseMsg& msg)
 {
 	char temporaryLine[BUFFER_LEN];
 	uint32_t contentLength;
-	uint8_t* contentBuffer = msg.buffer._getBuffer(&contentLength);
+	uint8_t* contentBuffer = msg._getBuffer(&contentLength);
 
 	// preparation
 	sprintf_s(temporaryLine, BUFFER_LEN, "%d", contentLength);
@@ -128,7 +139,7 @@ void HttpProtocol::sendResponse(HttpResponseMsg& msg)
 
 	// status line
 	sprintf_s(temporaryLine, BUFFER_LEN, "HTTP/1.1 %d %s\r\n", msg.statusCode, "OK");
-	this->iostream->write((uint8_t*) temporaryLine, strlen(temporaryLine));
+	this->iostream->write(temporaryLine);
 
 	// headers
 	map<string,string>::iterator it;
@@ -139,6 +150,7 @@ void HttpProtocol::sendResponse(HttpResponseMsg& msg)
 		this->iostream->write((uint8_t*)temporaryLine, strlen(temporaryLine));
 	}
 
+	this->iostream->write("\r\n");
 	this->iostream->write(contentBuffer, contentLength);
 }
 
@@ -181,7 +193,7 @@ bool MemBuffer::ensureEnoughSpace(uint32_t desiredSize)
 
 bool MemBuffer::write(const char * str)
 {
-	int len = strlen(str) + 1; // + null char
+	int len = strlen(str);
 	return this->write((uint8_t*) str, len);
 }
 
@@ -209,11 +221,6 @@ uint8_t * MemBuffer::_getBuffer(uint32_t * outSize)
 {
 	*outSize = this->buffUsed;
 	return this->buffer;
-}
-
-bool HttpResponseMsg::write(char * str)
-{
-	return this->buffer.write(str);
 }
 
 void HttpResponseMsg::setHeader(char* key, char* value)

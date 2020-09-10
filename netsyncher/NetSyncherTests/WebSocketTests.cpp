@@ -7,7 +7,7 @@ using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
 namespace NetSyncherTests
 {
-	TEST_CLASS(NetSyncherTests)
+	TEST_CLASS(WebSocketTests)
 	{
 	public:
 		TEST_METHOD(TestServerKey)
@@ -43,10 +43,7 @@ namespace NetSyncherTests
 				expected[BYTES_HEADER + i] = i & 0xFF;
 			}
 
-			Assert::AreEqual(BYTES_HEADER + LEN, written, L"Did not write correct amount of bytes");
-			for (uint32_t i = 0; i < written; i++) {
-				Assert::AreEqual(expected[i], outBuffer[i]);
-			}
+			compareBuffers(expected, BYTES_HEADER + LEN, outBuffer, written);
 		}
 
 		TEST_METHOD(TestWriteFrame_LenAbove125)
@@ -75,10 +72,7 @@ namespace NetSyncherTests
 				expected[BYTES_HEADER + i] = i & 0xFF;
 			}
 
-			Assert::AreEqual(BYTES_HEADER + LEN, written, L"Did not write correct amount of bytes");
-			for (uint32_t i = 0; i < written; i++) {
-				Assert::AreEqual(expected[i], outBuffer[i]);
-			}
+			compareBuffers(expected, BYTES_HEADER + LEN, outBuffer, written);
 		}
 
 		TEST_METHOD(TestWriteFrame_LenAbove16bit)
@@ -114,11 +108,7 @@ namespace NetSyncherTests
 			uint8_t outBuffer[OUT_LEN];
 			unsigned int written = ws.WriteFrame(WSOpcode::BinaryFrame, inBuffer, LEN, outBuffer, OUT_LEN, false);
 
-
-			Assert::AreEqual(BYTES_HEADER + LEN, written, L"Did not write correct amount of bytes");
-			for (uint32_t i = 0; i < written; i++) {
-				Assert::AreEqual(expected[i], outBuffer[i]);
-			}
+			compareBuffers(expected, BYTES_HEADER + LEN, outBuffer, written);
 		}
 
 		TEST_METHOD(TestReadFrame_LenLessThan125)
@@ -150,10 +140,7 @@ namespace NetSyncherTests
 			uint8_t expected[MSG_LEN];
 			for (int i = 0; i < MSG_LEN; i++) expected[i] = i & 0xFF;
 
-			Assert::AreEqual(MSG_LEN, msg->length, L"Frame read is not correct length");
-			for (uint32_t i = 0; i < msg->length; i++) {
-				Assert::AreEqual(expected[i], msg->buffer[i]);
-			}
+			compareBuffers(expected, MSG_LEN, msg->buffer, msg->length);
 		}
 	};
 }
