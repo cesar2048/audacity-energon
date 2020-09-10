@@ -223,7 +223,7 @@ uint8_t * MemBuffer::_getBuffer(uint32_t * outSize)
 	return this->buffer;
 }
 
-void HttpResponseMsg::setHeader(char* key, char* value)
+void HttpResponseMsg::setHeader(const char* key, const char* value)
 {
 	this->headers[key] = value;
 }

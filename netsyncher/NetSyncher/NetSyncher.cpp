@@ -6,6 +6,7 @@
 
 #include "NetSyncher.h"
 #include "HttpProtocol.h"
+#include <chrono>
 
 NetSyncher::NetSyncher() {
 }
@@ -45,7 +46,8 @@ public:
 	// Heredado vía IOStream
 	virtual uint32_t write(uint8_t * buffer, uint32_t len) override
 	{
-		return uint32_t();
+		this->socket->Write(buffer, len);
+		return this->socket->LastWriteCount();
 	}
 };
 
@@ -73,18 +75,36 @@ void HttpServer::Listen(int port) {
 }
 
 void HttpServer::ListenLoop(int port) {
+	int count = 0;
+	char tempLine[2048];
+	long dur = 0;
+
 	while (this->isServerThreadAlive) {
-		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		// std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		std::this_thread::yield();
 
 		wxSocketBase socket;
 		if (this->server->AcceptWith(socket, false)) {
-			WxInputStream wis(&socket);
-			HttpProtocol hp(&wis);
-			hp.readRequest();
+			std::chrono::system_clock::time_point ini = std::chrono::system_clock::now();
 
-			char response[] = "HTTP/1.1 200 ok\r\nContent-Type: application/json\r\n\r\n{\"Hello\":\"world\"}";
-			socket.Write(response, strlen(response));
+			WxInputStream ioSocket(&socket);
+
+			HttpProtocol hp(&ioSocket);
+			HttpRequestMsg req = hp.readRequest();
+
+			HttpResponseMsg res;
+			res.setHeader("Content-Type", "application/json");
+
+			
+
+			sprintf_s(tempLine, 2048, "{\"Hello\":\"world\",\"Count\":\"%d\",\"Duration\":\"%d\"}", count++, dur);
+			res.write(tempLine);
+
+			hp.sendResponse(res);
 			socket.Close();
+
+			std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
+			dur = std::chrono::duration_cast<std::chrono::milliseconds>(end - ini).count();
 			// this->isServerThreadAlive = false;
 		}
 	}

@@ -81,7 +81,7 @@ public:
 	map<string, string> headers;
 	int statusCode = 200;
 
-	void setHeader(char* key, char* value);
+	void setHeader(const char* key, const char* value);
 };
 
 /**
