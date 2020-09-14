@@ -7,6 +7,7 @@
 #include "NetSyncher.h"
 #include "HttpProtocol.h"
 #include <chrono>
+#include "debugapi.h"
 
 NetSyncher::NetSyncher() {
 }
@@ -72,19 +73,29 @@ void HttpServer::Listen(int port) {
 
 	this->server = new wxSocketServer(addr, wxSOCKET_NONE);
 	this->serverThread = new std::thread(&HttpServer::ListenLoop, this, port); // https://stackoverflow.com/a/10673671
+	// this->ListenLoop(port);
 }
 
 void HttpServer::ListenLoop(int port) {
+
+	// how to print to VisualStudio debug console 
+	// https://stackoverflow.com/questions/1333527/how-do-i-print-to-the-debug-output-window-in-a-win32-app
+	//
+	// slow connection to localhost
+	// https://github.com/golang/go/issues/23366#issuecomment-374397983
+
 	int count = 0;
 	char tempLine[2048];
 	long dur = 0;
 
 	while (this->isServerThreadAlive) {
-		// std::this_thread::sleep_for(std::chrono::milliseconds(100));
-		std::this_thread::yield();
-
 		wxSocketBase socket;
-		if (this->server->AcceptWith(socket, false)) {
+		bool hasConnection = this->server->WaitForAccept(0, 10);
+		if (hasConnection) {
+			OutputDebugString(L"Connection accepted\n");
+
+			this->server->AcceptWith(socket, false);
+		
 			std::chrono::system_clock::time_point ini = std::chrono::system_clock::now();
 
 			WxInputStream ioSocket(&socket);
@@ -95,8 +106,6 @@ void HttpServer::ListenLoop(int port) {
 			HttpResponseMsg res;
 			res.setHeader("Content-Type", "application/json");
 
-			
-
 			sprintf_s(tempLine, 2048, "{\"Hello\":\"world\",\"Count\":\"%d\",\"Duration\":\"%d\"}", count++, dur);
 			res.write(tempLine);
 
@@ -105,7 +114,6 @@ void HttpServer::ListenLoop(int port) {
 
 			std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
 			dur = std::chrono::duration_cast<std::chrono::milliseconds>(end - ini).count();
-			// this->isServerThreadAlive = false;
 		}
 	}
 }
