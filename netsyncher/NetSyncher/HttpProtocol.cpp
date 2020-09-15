@@ -32,19 +32,20 @@ static inline void toLower(std::string &data) {
 }
 
 static inline std::vector<string> split(std::string &s, char byChar) {
-	uint32_t lineLength = 0, consumed = 0;
+	int partLength = 0, consumed = 0, spliterLen = 1;
 	std::vector<string> lines;
 	std::string remainder(s);
 
 	while (remainder.length()) {
-		lineLength = remainder.find(byChar);
-		if (lineLength == string::npos) {
-			lineLength = remainder.length() - 1;
+		partLength = remainder.find(byChar);
+		if (partLength == string::npos) {
+			partLength = remainder.length();
+			spliterLen = 0;
 		}
-		string part = remainder.substr(0, lineLength);
+		string part = remainder.substr(0, partLength);
 
-		remainder = remainder.substr(lineLength + 1);
-		consumed += lineLength + 1;
+		remainder = remainder.substr(partLength + spliterLen);
+		consumed += partLength + spliterLen;
 
 		if (part.length() > 0) {
 			lines.push_back(part);
@@ -76,25 +77,26 @@ string HttpProtocol::getHeadersFromStream()
 	const char CRLFx2[] = "\r\n\r\n";
 	char buffer[BUFFER_LEN];
 	string text;
-	uint32_t read = 1, bytesToStringify = 1;
+	uint32_t read = 1;
+	char* endOfHeaders = NULL;
 
-	while (read != 0 && bytesToStringify == read) {
+	while (read != 0 && endOfHeaders == NULL) {
 		read = this->iostream->peek((uint8_t*)buffer, BUFFER_LEN - 1);
 		if (read) {
 			// null terminate our buffer
 			buffer[read] = '\0';
 
-			bytesToStringify = read;
-
+			uint32_t bytesToStringify = read;
 			uint32_t blankChars = strspn(buffer, "\t\r\n ");
-			char* endOfHeaders = strstr(buffer + blankChars, CRLFx2);
+
+			endOfHeaders = strstr(buffer + blankChars, CRLFx2);
 			if (endOfHeaders != NULL) {
-				bytesToStringify = (endOfHeaders - buffer) + strlen(CRLFx2);
+				bytesToStringify = (endOfHeaders - buffer);
 			}
 
 			text = text.append(buffer, bytesToStringify);
 
-			this->iostream->read((uint8_t*)buffer, bytesToStringify);
+			this->iostream->read((uint8_t*)buffer, bytesToStringify + strlen(CRLFx2));
 		}
 	}
 
