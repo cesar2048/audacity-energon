@@ -4,6 +4,8 @@
 #include <locale>
 #include <ctype.h>
 
+// -------------- functions -------------------------
+
 
 // https://stackoverflow.com/questions/216823/whats-the-best-way-to-trim-stdstring
 // trim from start (in place)
@@ -55,24 +57,7 @@ static inline std::vector<string> split(std::string &s, char byChar) {
 }
 
 
-// -------------- IOStream -------------------------
-
-
-uint32_t IOStream::write(const char * string)
-{
-	uint32_t len = strlen(string);
-	uint32_t res = this->write((uint8_t*)string, len);
-	return res;
-}
-
-
-// -------------- HttpProtocol -----------------------------
-
-
-HttpProtocol::HttpProtocol(IOStream *iostream) :iostream(iostream) {
-}
-
-string HttpProtocol::getHeadersFromStream()
+string readHeadersBlock(IOStream* iostream)
 {
 	const char CRLFx2[] = "\r\n\r\n";
 	char buffer[BUFFER_LEN];
@@ -81,7 +66,7 @@ string HttpProtocol::getHeadersFromStream()
 	char* endOfHeaders = NULL;
 
 	while (read != 0 && endOfHeaders == NULL) {
-		read = this->iostream->peek((uint8_t*)buffer, BUFFER_LEN - 1);
+		read = iostream->peek((uint8_t*)buffer, BUFFER_LEN - 1);
 		if (read) {
 			// null terminate our buffer
 			buffer[read] = '\0';
@@ -96,16 +81,67 @@ string HttpProtocol::getHeadersFromStream()
 
 			text = text.append(buffer, bytesToStringify);
 
-			this->iostream->read((uint8_t*)buffer, bytesToStringify + strlen(CRLFx2));
+			iostream->read((uint8_t*)buffer, bytesToStringify + strlen(CRLFx2));
 		}
 	}
 
 	return text;
 }
 
+
+void parseHeadersIntoMap(vector<string>& lines, map<string, string>& headers) {
+
+	for (int pos = 1; pos < lines.size(); pos++) {
+		vector<string> headerParts = split(lines[pos], ':');
+		if (headerParts.size() == 2) {
+			string key = headerParts[0];
+			string val = headerParts[1];
+			toLower(key);
+			trim(key);
+			trim(val);
+
+			headers.insert_or_assign(key, val);
+		}
+	}
+}
+
+// -------------- HttpRequestMsg -----------------------------
+
+HttpRequestMsg::HttpRequestMsg(IOStream * stream)
+	: stream(stream)
+{
+}
+
+shared_ptr<MultipartStream> HttpRequestMsg::readFile(char * name)
+{
+	shared_ptr<MultipartStream> stream(new MultipartStream(this->stream, "nada"));
+	return stream;
+}
+
+
+// -------------- HttpResponseMsg -----------------------------
+
+
+void HttpResponseMsg::setHeader(const char* key, const char* value)
+{
+	this->headers[key] = value;
+}
+
+
+// -------------- HttpProtocol -----------------------------
+
+
+HttpProtocol::HttpProtocol(IOStream *iostream) :iostream(iostream) {
+}
+
+
 HttpRequestMsg HttpProtocol::readRequest()
 {
 	/*
+	Pass the argument by reference
+	https://stackoverflow.com/a/14548993
+
+	Basic IO
 	https://stackoverflow.com/questions/17290144/stdio-vs-iostream
 	http://www.cplusplus.com/doc/tutorial/basic_io/
 	 
@@ -119,35 +155,22 @@ HttpRequestMsg HttpProtocol::readRequest()
 	https://stackoverflow.com/questions/772355/how-to-inherit-from-stdostream
 	*/
 
-	HttpRequestMsg msg = HttpRequestMsg();
-	string text = this->getHeadersFromStream();
-	
+	string text = readHeadersBlock(this->iostream);
 	std::vector<string> lines = split(text, '\n');
 	std::vector<string> parts = split(lines[0], ' ');
 
 	// more than 3 parts is protocolo error, we don't care
+	HttpRequestMsg msg = HttpRequestMsg(this->iostream);
 	if (parts.size() >= 3) {
 		msg.method = parts[0];
 		msg.uri = parts[1];
 	}
 
-	for (int pos = 1; pos < lines.size(); pos++) {
-		vector<string> headerParts = split(lines[pos], ':');
-		if (headerParts.size() == 2) {
-			string key = headerParts[0];
-			string val = headerParts[1];
-			toLower(key);
-			trim(key);
-			trim(val);
-			msg.headers.insert_or_assign(key, val);
-		}
-	}
+	parseHeadersIntoMap(lines, msg.headers);
+
 
 	return msg;
 }
-
-
-// -------------- HttpProtocol -----------------------------
 
 
 void HttpProtocol::sendResponse(HttpResponseMsg& msg)
@@ -173,80 +196,63 @@ void HttpProtocol::sendResponse(HttpResponseMsg& msg)
 		this->iostream->write((uint8_t*)temporaryLine, strlen(temporaryLine));
 	}
 
+	// content
 	this->iostream->write("\r\n");
 	this->iostream->write(contentBuffer, contentLength);
 }
 
 
-// -------------- MemBuffer -----------------------------
+
+// ----------------------- MultipartStream -----------------------
 
 
-MemBuffer::MemBuffer()
+MultipartStream::MultipartStream(IOStream* stream, string boundary)
+	: stream(stream), consumed(0), boundary(boundary), length(-1), isValid(true)
 {
-	this->buffer = (uint8_t*)malloc(BUFFER_LEN);
-	this->buffer[0] = 0;
-	this->buffSize = BUFFER_LEN;
 }
 
-MemBuffer::MemBuffer(MemBuffer &original)
+uint32_t MultipartStream::peek(uint8_t * buffer, uint32_t len)
 {
-	this->buffSize = original.buffSize;
-	this->buffer = (uint8_t*)malloc(this->buffSize);
-
-	memcpy(this->buffer, original.buffer, original.buffSize);
+	throw string("Not implemented");
 }
 
-MemBuffer::~MemBuffer()
+uint32_t MultipartStream::read(uint8_t * buffer, uint32_t len)
 {
-	free(this->buffer);
-}
+	if (!this->isValid) {
+		return -1;
+	}
 
-bool MemBuffer::ensureEnoughSpace(uint32_t desiredSize)
-{
-	if (this->buffSize < desiredSize) {
-		void* ptr = realloc(this->buffer, this->buffSize * 2);
-		if (!ptr) {
-			return false;
+	if (this->length == -1) {
+		string mimeHeadersText = readHeadersBlock(this->stream);
+		std::vector<string> lines = split(mimeHeadersText, '\n');
+		
+		parseHeadersIntoMap(lines, this->mimeHeaders);
+
+		if (this->mimeHeaders.find("content-length") != this->mimeHeaders.end()) {
+			try {
+				int contentLength = stoi(this->mimeHeaders["content-length"]);
+				this->length = contentLength;
+			}
+			catch (const std::invalid_argument& ia) {
+				this->isValid = false;
+				ia.what();
+			}
 		}
-		this->buffer = (uint8_t*)ptr;
-		this->buffSize *= 2;
-	}
-	return true;
-}
-
-bool MemBuffer::write(const char * str)
-{
-	int len = strlen(str);
-	return this->write((uint8_t*) str, len);
-}
-
-bool MemBuffer::write(uint8_t * buffer, uint32_t len)
-{
-	uint32_t spaceNeeded = this->buffUsed + len;
-	bool hasEnoughSpace = this->ensureEnoughSpace(spaceNeeded);
-	if (!hasEnoughSpace) {
-		return false;
 	}
 
-	uint32_t available = this->buffSize - this->buffUsed;
-	uint8_t* ptrStart = this->buffer + this->buffUsed;
 
-	memcpy_s(ptrStart, available, buffer, len);
-	this->buffUsed += len;
+	uint32_t available = this->length - this->consumed;
+	uint32_t readable  = available < len ? available : len;
+	if (!readable) {
+		return 0;
+	}
+
+	uint32_t bytesRead = this->stream->read(buffer, readable);
+	this->consumed += bytesRead;
+	return bytesRead;
 }
 
-uint32_t MemBuffer::size()
+uint32_t MultipartStream::write(uint8_t * buffer, uint32_t len)
 {
-	return this->buffUsed;
-}
-
-uint8_t * MemBuffer::_getBuffer(uint32_t * outSize)
-{
-	*outSize = this->buffUsed;
-	return this->buffer;
-}
-
-void HttpResponseMsg::setHeader(const char* key, const char* value)
-{
-	this->headers[key] = value;
+	return uint32_t();
 }

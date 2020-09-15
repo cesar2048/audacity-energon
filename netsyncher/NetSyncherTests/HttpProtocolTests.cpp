@@ -99,11 +99,6 @@ namespace NetSyncherTests
 
 		TEST_METHOD(Test_Multipart)
 		{
-			const DWORD nBuff = 2048;
-			TCHAR infoBuf[nBuff];
-			GetCurrentDirectory(nBuff, infoBuf);
-			OutputDebugString(infoBuf);
-
 			TransmissionReader tr("sample-multipart-request.bin");
 
 			HttpProtocol http = HttpProtocol(&tr);
@@ -114,7 +109,17 @@ namespace NetSyncherTests
 
 			Assert::AreEqual(headerBytes, position);
 
-			// IOStream file = req.readFile("theFile");
+			shared_ptr<MultipartStream> file = req.readFile("theFile");
+			Assert::IsTrue(file != nullptr);
+
+			int read = -1;
+			uint8_t buffer[4096];
+			FILE* f = fopen("video.mp4", "wb");
+			do {
+				read = file->read(buffer, 2048);
+				fwrite(buffer, sizeof(uint8_t), read, f);
+			} while (read != 0);
+			fclose(f);
 		}
 	};
 }

@@ -168,6 +168,7 @@
     <ClCompile Include="base64.c" />
     <ClCompile Include="HttpProtocol.cpp" />
     <ClCompile Include="Main.cpp" />
+    <ClCompile Include="MemBuffer.cpp" />
     <ClCompile Include="NetSyncher.cpp" />
     <ClCompile Include="sha1.c" />
     <ClCompile Include="WebsocketProtocol.cpp" />
@@ -175,6 +176,7 @@
   <ItemGroup>
     <ClInclude Include="base64.h" />
     <ClInclude Include="HttpProtocol.h" />
+    <ClInclude Include="MemBuffer.h" />
     <ClInclude Include="NetSyncher.h" />
     <ClInclude Include="sha1.h" />
     <ClInclude Include="WebsocketProtocol.h" />
