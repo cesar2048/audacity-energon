@@ -44,7 +44,7 @@ public:
 
 	/*
 	*/
-	shared_ptr<MultipartStream> readFile(char* name);
+	shared_ptr<MultipartStream> readFile(const char* name);
 };
 
 

@@ -112,7 +112,7 @@ HttpRequestMsg::HttpRequestMsg(IOStream * stream)
 {
 }
 
-shared_ptr<MultipartStream> HttpRequestMsg::readFile(char * name)
+shared_ptr<MultipartStream> HttpRequestMsg::readFile(const char * name)
 {
 	shared_ptr<MultipartStream> stream(new MultipartStream(this->stream, "nada"));
 	return stream;
@@ -243,12 +243,19 @@ uint32_t MultipartStream::read(uint8_t * buffer, uint32_t len)
 
 	uint32_t available = this->length - this->consumed;
 	uint32_t readable  = available < len ? available : len;
-	if (!readable) {
+	if (readable == 0) {
 		return 0;
 	}
 
 	uint32_t bytesRead = this->stream->read(buffer, readable);
 	this->consumed += bytesRead;
+
+	if (this->consumed == this->length) {
+		// read the ending boundary from the stream
+		uint8_t endLine[2048];
+		this->stream->read(endLine, 2048);
+	}
+
 	return bytesRead;
 }
 
