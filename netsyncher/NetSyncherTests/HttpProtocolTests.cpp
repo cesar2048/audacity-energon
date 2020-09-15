@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "CppUnitTest.h"
+#include <windows.h>
 
 #include "../NetSyncher/HttpProtocol.h"
 
@@ -9,55 +10,6 @@ using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
 namespace NetSyncherTests
 {
-	/* Auxiliary class to test to provide an in-memory IOStream */
-	class StrInputStream : public IOStream {
-	public:
-		char* inputBuffer;
-		int inCursor;
-		MemBuffer outBuffer;
-
-		StrInputStream(const char *str) {
-			size_t bufferSize = strlen(str) + 1;
-
-			this->inCursor = 0;
-			this->inputBuffer = (char*)malloc(bufferSize);
-
-			strcpy_s(this->inputBuffer, bufferSize, str);
-		}
-
-		~StrInputStream() {
-			if (this->inputBuffer) {
-				free(this->inputBuffer);
-			}
-		}
-
-		// Imlements the read interface
-		virtual uint32_t read(uint8_t * buffer, uint32_t len) override
-		{
-			char* str = this->inputBuffer + this->inCursor;
-
-			uint32_t strLen = strlen(str);
-			uint32_t min = (len > strLen) ? strLen : len;
-
-			if (min > 0) {
-				memcpy(buffer, str, min);
-				this->inCursor += min;
-			}
-			
-			return min;
-		}
-
-		// Implements write interface
-		virtual uint32_t write(uint8_t* buffer, uint32_t len) override
-		{
-			bool result = this->outBuffer.write(buffer, len);
-			if (result) {
-				return len;
-			}
-			return 0;
-		}
-
-	};
 
 	TEST_CLASS(HttpProtocolTests)
 	{
@@ -143,6 +95,21 @@ namespace NetSyncherTests
 			uint8_t* outBuffer = iss.outBuffer._getBuffer(&outLen);
 
 			compareBuffers((uint8_t*)buffer, expectedLen, outBuffer, outLen);
+		}
+
+		TEST_METHOD(Test_Multipart)
+		{
+			const DWORD nBuff = 2048;
+			TCHAR infoBuf[nBuff];
+			GetCurrentDirectory(nBuff, infoBuf);
+			OutputDebugString(infoBuf);
+
+			TransmissionReader tr("sample-multipart-request.bin");
+
+			HttpProtocol http = HttpProtocol(&tr);
+			HttpRequestMsg req = http.readRequest();
+
+			// IOStream file = req.readFile("theFile");
 		}
 	};
 }

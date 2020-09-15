@@ -7,8 +7,38 @@
 #ifndef PCH_H
 #define PCH_H
 #include <string>
+#include "../NetSyncher/HttpProtocol.h"
 
-// agregue aquí los encabezados que desea precompilar
+// Assert that two buffers have the same content
 void compareBuffers(uint8_t* expected, uint32_t expectedLen, uint8_t* actual, uint32_t actualLen);
+
+namespace NetSyncherTests {
+	class StrInputStream : public IOStream {
+	public:
+
+		char* inputBuffer;
+		int inCursor;
+		MemBuffer outBuffer;
+		StrInputStream(const char *str);
+		~StrInputStream();
+
+		virtual uint32_t peek(uint8_t * buffer, uint32_t len) override;
+		virtual uint32_t read(uint8_t * buffer, uint32_t len) override;
+		virtual uint32_t write(uint8_t* buffer, uint32_t len) override;
+	};
+
+	// Helper class that reads a network transmission previously recorded (reads buffer by buffer as received)
+	class TransmissionReader : public IOStream {
+		uint32_t frameLength;
+		FILE* f;
+
+	public:
+		TransmissionReader(char *fileName);
+		virtual uint32_t peek(uint8_t * buffer, uint32_t len) override;
+		virtual uint32_t read(uint8_t * buffer, uint32_t len) override;
+		virtual uint32_t write(uint8_t * buffer, uint32_t len) override;
+	};
+
+}
 
 #endif //PCH_H

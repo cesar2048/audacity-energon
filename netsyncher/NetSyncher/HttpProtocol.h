@@ -10,6 +10,11 @@ using namespace std;
 class IOStream {
 public:
 	/*
+	Peek into the stream without advancing the buffer and deleting the information
+	*/
+	virtual uint32_t peek(uint8_t* buffer, uint32_t len) = 0;
+
+	/*
 	Reads up to len bytes into buffer.
 	Returns the number of read bytes
 	*/
@@ -92,6 +97,8 @@ requiring to have the entire response in memory before sending it back to the cl
 class HttpProtocol
 {
 	IOStream *iostream;
+
+	string getHeadersFromStream();
 
 public:
 

@@ -71,6 +71,30 @@ uint32_t IOStream::write(const char * string)
 HttpProtocol::HttpProtocol(IOStream *iostream) :iostream(iostream) {
 }
 
+string HttpProtocol::getHeadersFromStream()
+{
+	const char CRLFx2[] = "\r\n\r\n";
+	char buffer[BUFFER_LEN];
+	string text;
+	uint32_t read = 1, bytesToStringify = 1;
+
+	while (read != 0 && bytesToStringify == read) {
+		read = this->iostream->read((uint8_t*)buffer, BUFFER_LEN);
+		if (read) {
+			bytesToStringify = read;
+
+			char* endOfHeaders = strstr(buffer, CRLFx2);
+			if (endOfHeaders != NULL) {
+				bytesToStringify = (endOfHeaders - buffer) + strlen(CRLFx2);
+			}
+
+			text = text.append(buffer, bytesToStringify);
+		}
+	}
+
+	return text;
+}
+
 HttpRequestMsg HttpProtocol::readRequest()
 {
 	/*
@@ -88,22 +112,13 @@ HttpRequestMsg HttpProtocol::readRequest()
 	*/
 
 	HttpRequestMsg msg = HttpRequestMsg();
-
-	char buffer[BUFFER_LEN];
-	string text;
-	uint32_t read = 1;
-
-	while (read != 0) {
-		read = this->iostream->read((uint8_t*)buffer, BUFFER_LEN);
-		if (read) {
-			text = text.append(buffer, read);
-		}
-	}
-
+	string text = this->getHeadersFromStream();
+	
 	std::vector<string> lines = split(text, '\n');
 	std::vector<string> parts = split(lines[0], ' ');
 
-	if (parts.size() >= 3) { // more than 3 is protocolo error, we don't care
+	// more than 3 parts is protocolo error, we don't care
+	if (parts.size() >= 3) {
 		msg.method = parts[0];
 		msg.uri = parts[1];
 	}
