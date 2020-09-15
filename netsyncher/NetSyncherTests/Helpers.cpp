@@ -71,30 +71,23 @@ namespace NetSyncherTests
 
 	TransmissionReader::TransmissionReader(char *fileName) {
 		this->f = fopen(fileName, "rb");
-		this->frameLength = -1;
+		this->lastFrameLength = -1;
 	}
 
-	uint32_t TransmissionReader::peek(uint8_t * buffer, uint32_t len)
-	{
-		long pos = ftell(this->f);
-
-		uint32_t bytesRead = this->read(buffer, len);
-
-		fseek(this->f, pos, SEEK_SET);
-		return bytesRead;
-	}
-
-	uint32_t TransmissionReader::read(uint8_t * buffer, uint32_t len)
+	uint32_t TransmissionReader::readFromFile(uint8_t * buffer, uint32_t len, bool peek)
 	{
 		if (this->f == NULL) {
 			return 0;
 		}
 
-		if (this->frameLength == -1) {
-			fread(&this->frameLength, sizeof(uint32_t), 1, this->f);
+		long pos = ftell(this->f);
+		uint32_t frameLength = this->lastFrameLength;
+
+		if (this->lastFrameLength == -1) {
+			fread(&frameLength, sizeof(uint32_t), 1, this->f);
 		}
-		
-		uint32_t bytesToRead = len < this->frameLength ? len : this->frameLength;
+
+		uint32_t bytesToRead = len < this->lastFrameLength ? len : this->lastFrameLength;
 		uint32_t bytesRead = fread(buffer, sizeof(uint8_t), bytesToRead, f);
 
 		if (bytesToRead != bytesRead) {
@@ -102,17 +95,34 @@ namespace NetSyncherTests
 			throw string("Mismatch between amount to read and actually read");
 		}
 
-		if (feof(this->f)) {
-			fclose(this->f);
-			this->f = NULL;
-		}
+		if (peek) {
+			// restore position
+			fseek(this->f, pos, SEEK_SET);
+		} else {
+			// advance position
+			this->lastFrameLength = frameLength - bytesRead;
+			if (this->lastFrameLength == 0) {
+				this->lastFrameLength = -1;
+			}
 
-		this->frameLength -= bytesRead;
-		if (this->frameLength == 0) {
-			this->frameLength = -1;
+			// close the file if we reached the end
+			if (feof(this->f)) {
+				fclose(this->f);
+				this->f = NULL;
+			}
 		}
 
 		return bytesRead;
+	}
+
+	uint32_t TransmissionReader::peek(uint8_t * buffer, uint32_t len)
+	{
+		return this->readFromFile(buffer, len, true);
+	}
+
+	uint32_t TransmissionReader::read(uint8_t * buffer, uint32_t len)
+	{
+		return this->readFromFile(buffer, len, false);
 	}
 
 	uint32_t TransmissionReader::write(uint8_t * buffer, uint32_t len)

@@ -13,6 +13,7 @@
 void compareBuffers(uint8_t* expected, uint32_t expectedLen, uint8_t* actual, uint32_t actualLen);
 
 namespace NetSyncherTests {
+	// Implements the IOStream interface from a string
 	class StrInputStream : public IOStream {
 	public:
 
@@ -29,9 +30,10 @@ namespace NetSyncherTests {
 
 	// Helper class that reads a network transmission previously recorded (reads buffer by buffer as received)
 	class TransmissionReader : public IOStream {
-		uint32_t frameLength;
+		uint32_t lastFrameLength;
 		FILE* f;
 
+		uint32_t readFromFile(uint8_t * buffer, uint32_t len, bool peek);
 	public:
 		TransmissionReader(char *fileName);
 		virtual uint32_t peek(uint8_t * buffer, uint32_t len) override;
