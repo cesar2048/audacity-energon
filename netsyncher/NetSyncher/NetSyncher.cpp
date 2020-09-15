@@ -45,7 +45,7 @@ public:
 	{
 		socket->Peek(buffer, len);
 		uint32_t bytesRead = postRead();
-
+		
 		if (bytesRead == 0) {
 			// force peek by doing a blocking read and unread
 			bytesRead = this->read(buffer, len);
@@ -76,7 +76,7 @@ public:
 
 // ---------------------------------
 
-void WritePiecesToFile(WxIOStream *ios) {
+void WritePiecesToFile(const char *fileName, WxIOStream *ios) {
 	const uint32_t KiloByte = 1024;
 	const uint32_t MegaByte = KiloByte * 1024;
 	const uint32_t BuffSize = 5 * MegaByte;
@@ -84,7 +84,7 @@ void WritePiecesToFile(WxIOStream *ios) {
 	uint8_t* buffer = (uint8_t*)malloc(BuffSize);
 	char tempLine[2048];
 
-	FILE* f = fopen("outputdata.bin", "wb");
+	FILE* f = fopen(fileName, "wb");
 
 	uint32_t bytesRead = 0, bytesUsed = 0;
 	do {
@@ -148,24 +148,38 @@ void HttpServer::ListenLoop(int port) {
 			WxIOStream ioSocket(&socket);
 			HttpProtocol hp(&ioSocket);
 
-			// WritePiecesToFile(&ioSocket);
-
+			// sprintf(tempLine, "request-%d.mp4", count);
+			// WritePiecesToFile(tempLine, &ioSocket);
+			
 			HttpRequestMsg req = hp.readRequest();
 			shared_ptr<MultipartStream> file = req.readFile("filename");
-			int read = -1;
-			uint8_t buffer[4096];
-			time_t ts = time(NULL);
-			sprintf(tempLine, "video-%d.mp4", ts);
-			FILE* f = fopen(tempLine, "wb");
-			do {
-				read = file->read(buffer, 2048);
-				fwrite(buffer, sizeof(uint8_t), read, f);
-			} while (read != 0);
-			fclose(f);
+
+			int totalRead = 0;
+			int totalExpected = 0;
+			if (file != nullptr) {
+				int read = -1;
+				totalExpected = file->getLength();
+
+				uint8_t buffer[4096];
+				time_t ts = time(NULL);
+				sprintf(tempLine, "video-%d.mp4", ts);
+				FILE* f = fopen(tempLine, "wb");
+				do {
+					read = file->read(buffer, 2048);
+					totalRead += read;
+					fwrite(buffer, sizeof(uint8_t), read, f);
+				} while (read != 0);
+				fclose(f);
+			}
 
 			HttpResponseMsg res;
 			res.setHeader("Content-Type", "application/json");
-			sprintf_s(tempLine, 2048, "{\"Hello\":\"world\",\"Count\":\"%d\",\"Duration\":\"%d\"}", count++, dur);
+			sprintf_s(tempLine, 2048, "{\"Hello\":\"world\",\n"
+				"\"Count\":%d,\n"
+				"\"Duration\":%d,"
+				"\"Received\":%d,"
+				"\"Expected\":%d"
+				"\n}", count++, dur, totalRead, totalExpected);
 			res.write(tempLine);
 
 			hp.sendResponse(res);

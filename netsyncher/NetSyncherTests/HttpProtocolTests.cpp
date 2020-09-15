@@ -97,29 +97,53 @@ namespace NetSyncherTests
 			compareBuffers((uint8_t*)buffer, expectedLen, outBuffer, outLen);
 		}
 
-		TEST_METHOD(Test_Multipart)
+		TEST_METHOD(Http_MultipartFileUpload)
 		{
+			// prepare
+			const int headerBytes = 230;
+			const int knownFileSize = 770865;
 			TransmissionReader tr("sample-multipart-request.bin");
-
 			HttpProtocol http = HttpProtocol(&tr);
+			
+			// execute 1
 			HttpRequestMsg req = http.readRequest();
 
+			// assert 1
 			int position = tr.position();
-			const int headerBytes = 230;
-
 			Assert::AreEqual(headerBytes, position);
 
+			// execute 2
 			shared_ptr<MultipartStream> file = req.readFile("theFile");
-			Assert::IsTrue(file != nullptr);
 
+			// assert 2
+			Assert::IsTrue(file != nullptr);
 			int read = -1;
+			int totalRead = 0;
 			uint8_t buffer[4096];
-			FILE* f = fopen("video.mp4", "wb");
 			do {
 				read = file->read(buffer, 2048);
-				fwrite(buffer, sizeof(uint8_t), read, f);
+				totalRead += read;
 			} while (read != 0);
-			fclose(f);
+			Assert::AreEqual(knownFileSize, totalRead);
+		}
+
+		TEST_METHOD(Http_NoMultipartRequest)
+		{
+			// prepare
+			static const char* sampleGetReq =
+				"GET /pub/WWW/TheProject.html HTTP/1.1" CR_LF
+				"Host: www.w3.org"						CR_LF
+				"Accept: application/json"				CR_LF
+				CR_LF;
+
+			// execute
+			StrInputStream iss(sampleGetReq);
+			HttpProtocol http = HttpProtocol(&iss);
+			HttpRequestMsg req = http.readRequest();
+
+			// assert
+			shared_ptr<MultipartStream> file = req.readFile("theFile");
+			Assert::IsTrue(file == nullptr);
 		}
 	};
 }

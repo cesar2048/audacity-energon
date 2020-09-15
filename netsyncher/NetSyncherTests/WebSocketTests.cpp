@@ -10,7 +10,7 @@ namespace NetSyncherTests
 	TEST_CLASS(WebSocketTests)
 	{
 	public:
-		TEST_METHOD(TestServerKey)
+		TEST_METHOD(WS_ServerKey)
 		{
 			WebsocketProtocol ws = WebsocketProtocol();
 			char* key = ws.CalculateSignature("dGhlIHNhbXBsZSBub25jZQ==");
@@ -19,7 +19,7 @@ namespace NetSyncherTests
 			Assert::AreEqual(expected, key);
 		}
 
-		TEST_METHOD(TestWriteFrame_LenLessThan125)
+		TEST_METHOD(WS_WriteFrame_LenLessThan125)
 		{
 			static const size_t LEN = 100;
 			static const size_t BYTES_HEADER = 2 + 0;
@@ -46,7 +46,7 @@ namespace NetSyncherTests
 			compareBuffers(expected, BYTES_HEADER + LEN, outBuffer, written);
 		}
 
-		TEST_METHOD(TestWriteFrame_LenAbove125)
+		TEST_METHOD(WS_WriteFrame_LenAbove125)
 		{
 			static const size_t LEN = 130;
 			static const size_t BYTES_HEADER = 2 + 2;
@@ -75,7 +75,7 @@ namespace NetSyncherTests
 			compareBuffers(expected, BYTES_HEADER + LEN, outBuffer, written);
 		}
 
-		TEST_METHOD(TestWriteFrame_LenAbove16bit)
+		TEST_METHOD(WS_WriteFrame_LenAbove16bit)
 		{
 			static const size_t OUT_LEN = UINT16_MAX + 200;
 			static const size_t LEN = UINT16_MAX + 100;
@@ -111,7 +111,7 @@ namespace NetSyncherTests
 			compareBuffers(expected, BYTES_HEADER + LEN, outBuffer, written);
 		}
 
-		TEST_METHOD(TestReadFrame_LenLessThan125)
+		TEST_METHOD(WS_ReadFrame_LenLessThan125)
 		{
 			// build frame to read
 			static const size_t MSG_LEN = 100;

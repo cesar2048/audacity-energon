@@ -1,7 +1,22 @@
 #pragma once
 
 #include <memory>
+
+#include <functional>
+
 #define BUFFER_LEN 2048
+
+class Buffer {
+public:
+	uint32_t len;
+	uint8_t* buffer;
+
+	Buffer(uint32_t len, uint8_t* buffer);
+	Buffer(const char* str);
+
+	static Buffer fromString(const char* str);
+	Buffer operator+(unsigned int offset);
+};
 
 class IOStream {
 public:
@@ -42,6 +57,7 @@ class MemBuffer
 
 public:
 	MemBuffer();
+	MemBuffer(uint32_t size);
 	MemBuffer(MemBuffer&);
 	~MemBuffer();
 
@@ -54,5 +70,23 @@ public:
 
 	uint32_t size();
 
+	uint8_t* getBuffer();
+
 	uint8_t* _getBuffer(uint32_t *outSize);
 };
+
+// ---- 
+
+// Returns the position where the first ocurrence of the sequence bytesToFind is found in buffer
+// -1 if nothing is found
+int findSequenceInBuffer(uint8_t* buffer, uint32_t len, uint8_t* bytesToFind, uint32_t bytesLength);
+int findSequenceInBuffer(Buffer have, Buffer sequenceToFind);
+
+int findByteSpan(Buffer have, Buffer bytes);
+
+// consumes from the stream until the position returned by the lambda function,
+// or until there is no more bytes available
+std::shared_ptr<MemBuffer> readUntilPosition(IOStream* iostream, const std::function<int(Buffer)>& getEndPos);
+
+// reads from the stream until the endSequence is found, or until there is no more in the stream
+std::shared_ptr<MemBuffer> readUntil(IOStream* iostream, uint8_t* endSequence, uint32_t endLength);

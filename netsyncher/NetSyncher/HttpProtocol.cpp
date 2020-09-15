@@ -1,8 +1,4 @@
 #include "HttpProtocol.h"
-#include <algorithm> 
-#include <cctype>
-#include <locale>
-#include <ctype.h>
 
 // -------------- functions -------------------------
 
@@ -56,39 +52,32 @@ static inline std::vector<string> split(std::string &s, char byChar) {
 	return lines;
 }
 
-
 string readHeadersBlock(IOStream* iostream)
 {
-	const char CRLFx2[] = "\r\n\r\n";
-	char buffer[BUFFER_LEN];
-	string text;
-	uint32_t read = 1;
-	char* endOfHeaders = NULL;
+	Buffer endSeq = Buffer::fromString("\r\n\r\n");
+	Buffer spaces = Buffer::fromString("\r\n\t ");
+	bool skipSpaces = true;
 
-	while (read != 0 && endOfHeaders == NULL) {
-		read = iostream->peek((uint8_t*)buffer, BUFFER_LEN - 1);
-		if (read) {
-			// null terminate our buffer
-			buffer[read] = '\0';
-
-			uint32_t bytesToStringify = read;
-			uint32_t blankChars = strspn(buffer, "\t\r\n ");
-
-			endOfHeaders = strstr(buffer + blankChars, CRLFx2);
-			if (endOfHeaders != NULL) {
-				bytesToStringify = (endOfHeaders - buffer);
+	shared_ptr<MemBuffer> bytes = readUntilPosition(iostream, [&](Buffer b) {
+		int skip = 0;
+		if (skipSpaces) {
+			skip = findByteSpan(b, spaces);
+			if (skip < b.len) {
+				skipSpaces = false;
 			}
-
-			text = text.append(buffer, bytesToStringify);
-
-			iostream->read((uint8_t*)buffer, bytesToStringify + strlen(CRLFx2));
 		}
-	}
 
+		int found = findSequenceInBuffer(b + skip, endSeq);
+		return (found == -1) ? -1 : skip + found + endSeq.len;
+	});
+
+	string text((char*) bytes->getBuffer(), bytes->size());
+	trim(text);
 	return text;
 }
 
-
+/// Takes a list of lines representing http headers
+/// and puts them as key/value pairs in the headers map
 void parseHeadersIntoMap(vector<string>& lines, map<string, string>& headers) {
 
 	for (int pos = 1; pos < lines.size(); pos++) {
@@ -105,17 +94,62 @@ void parseHeadersIntoMap(vector<string>& lines, map<string, string>& headers) {
 	}
 }
 
-// -------------- HttpRequestMsg -----------------------------
-
-HttpRequestMsg::HttpRequestMsg(IOStream * stream)
-	: stream(stream)
+/// gets a header from a key/value map
+/// returns nullptr if the header is not found
+/// unlike [] operator, does not create an empty value if there is none
+shared_ptr<string> getMapValue(const map<string, string>& headers, string key)
 {
+	auto it = headers.find(key);
+	if (it != headers.end()) {
+		return shared_ptr<string>(new string(it->second));
+	}
+	return nullptr;
 }
 
-shared_ptr<MultipartStream> HttpRequestMsg::readFile(const char * name)
+/// gets a header from a key/value map as integer
+/// returns nullptr if the header is not found
+shared_ptr<int> getHeaderAsInt(const map<string, string> headers, string key)
 {
-	shared_ptr<MultipartStream> stream(new MultipartStream(this->stream, "nada"));
-	return stream;
+	auto value = getMapValue(headers, key);
+	if (value != nullptr) {
+		try {
+			shared_ptr<int> result(new int);
+			*result = stoi(*value);
+			return result;
+		}
+		catch (const std::invalid_argument& ia) {
+			ia.what();
+		}
+	}
+	return nullptr;
+}
+
+/// returns a multivalue header value as a key/value dictionary
+/// example, the following header
+///   Content-Type: multipart/form-data; boundary=49cda107-3fbb-4edf-a726-7da8756f5a4b
+/// is converted to
+///   "value" => "multipart/form-data"
+///   "boundary" => "49cda107-3fbb-4edf-a726-7da8756f5a4b"
+map<string, string> getAttributeMap(string stringValue) {
+	map<string, string> attributes;
+
+	auto parts = split(stringValue, ';');
+	for (int i = 0; i < parts.size(); i++) {
+		string part = parts[i];
+		trim(part);
+
+		std::vector<string> keyValuePair = split(part, '=');
+		if (keyValuePair.size() == 1) {
+			attributes["value"] = part;
+		} else if (keyValuePair.size() == 2) {
+			string key = keyValuePair[0];
+			string val = keyValuePair[1];
+
+			attributes[key] = val;
+		}
+	}
+
+	return attributes;
 }
 
 
@@ -156,6 +190,7 @@ HttpRequestMsg HttpProtocol::readRequest()
 	*/
 
 	string text = readHeadersBlock(this->iostream);
+
 	std::vector<string> lines = split(text, '\n');
 	std::vector<string> parts = split(lines[0], ' ');
 
@@ -168,7 +203,20 @@ HttpRequestMsg HttpProtocol::readRequest()
 
 	parseHeadersIntoMap(lines, msg.headers);
 
+	// check for multipart
+	auto contentType = getMapValue(msg.headers, "content-type");
+	if (contentType != nullptr) {
+		auto attributes = getAttributeMap(*contentType);
+		auto value = getMapValue(attributes, "value");
 
+		if (value && *value == "multipart/form-data") {
+			auto boundary = getMapValue(attributes, "boundary");
+			if (boundary) {
+				msg.setMultipartBoundary(*boundary);
+			}
+		}
+	}
+	
 	return msg;
 }
 
@@ -202,13 +250,57 @@ void HttpProtocol::sendResponse(HttpResponseMsg& msg)
 }
 
 
+// -------------- HttpRequestMsg -----------------------------
+
+HttpRequestMsg::HttpRequestMsg(IOStream * stream)
+	: stream(stream)
+{
+}
+
+void HttpRequestMsg::setMultipartBoundary(string boundary)
+{
+	this->multipartBoundary = boundary;
+}
+
+map<string, string> HttpRequestMsg::readMimePartHeaders()
+{
+	string mimeHeadersText = readHeadersBlock(this->stream);
+	std::vector<string> lines = split(mimeHeadersText, '\n');
+	map<string, string> mimeHeaders;
+	parseHeadersIntoMap(lines, mimeHeaders);
+	return mimeHeaders;
+}
+
+shared_ptr<MultipartStream> HttpRequestMsg::readFile(const char * name)
+{
+	bool isFile = false;
+	auto mimeHeaders = this->readMimePartHeaders();
+	auto contentLength = getHeaderAsInt(mimeHeaders, "content-length");
+
+	if (this->method == "POST" && this->multipartBoundary.size() > 0) {
+		if (contentLength == nullptr) {
+			contentLength = shared_ptr<int>(new int(-1));
+		}
+
+		MultipartStream* ptr = new MultipartStream(this->stream, this->multipartBoundary, *contentLength);
+		return shared_ptr<MultipartStream>(ptr);
+	}
+
+	return nullptr;
+}
+
 
 // ----------------------- MultipartStream -----------------------
 
 
-MultipartStream::MultipartStream(IOStream* stream, string boundary)
-	: stream(stream), consumed(0), boundary(boundary), length(-1), isValid(true)
+MultipartStream::MultipartStream(IOStream* stream, string boundary, int contentLength)
+	: stream(stream), available(-1), boundary(boundary), length(contentLength)
 {
+}
+
+int MultipartStream::getLength()
+{
+	return this->length;
 }
 
 uint32_t MultipartStream::peek(uint8_t * buffer, uint32_t len)
@@ -218,44 +310,24 @@ uint32_t MultipartStream::peek(uint8_t * buffer, uint32_t len)
 
 uint32_t MultipartStream::read(uint8_t * buffer, uint32_t len)
 {
-	if (!this->isValid) {
-		return -1;
-	}
-
-	if (this->length == -1) {
-		string mimeHeadersText = readHeadersBlock(this->stream);
-		std::vector<string> lines = split(mimeHeadersText, '\n');
-		
-		parseHeadersIntoMap(lines, this->mimeHeaders);
-
-		if (this->mimeHeaders.find("content-length") != this->mimeHeaders.end()) {
-			try {
-				int contentLength = stoi(this->mimeHeaders["content-length"]);
-				this->length = contentLength;
-			}
-			catch (const std::invalid_argument& ia) {
-				this->isValid = false;
-				ia.what();
-			}
-		}
-	}
-
-
-	uint32_t available = this->length - this->consumed;
-	uint32_t readable  = available < len ? available : len;
-	if (readable == 0) {
+	if (this->available == 0) {
 		return 0;
 	}
 
-	uint32_t bytesRead = this->stream->read(buffer, readable);
-	this->consumed += bytesRead;
+	string endBoundary = "\r\n--" + this->boundary + "--\r\n";
+	Buffer endBuffer = endBoundary.c_str();
+	
+	uint32_t bytesRead = this->stream->peek(buffer, len);
+	uint32_t bytesToConsume = bytesRead;
 
-	if (this->consumed == this->length) {
-		// read the ending boundary from the stream
-		uint8_t endLine[2048];
-		this->stream->read(endLine, 2048);
+	int boundaryPos = findSequenceInBuffer(Buffer(len, buffer), endBuffer);
+	if (boundaryPos != -1) {
+		bytesToConsume = boundaryPos + endBuffer.len;
+		bytesRead = boundaryPos;
+		this->available = 0;
 	}
 
+	this->stream->read(buffer, bytesToConsume);
 	return bytesRead;
 }
 

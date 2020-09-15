@@ -2,10 +2,17 @@
 
 #include <vector>
 #include <map>
-#include <memory>
+#include <algorithm> 
+#include <cctype>
+#include <locale>
+#include <ctype.h>
+
 #include "MemBuffer.h"
 
 using namespace std;
+
+// shared_ptr<string> getMapValue(const map<string, string>& headers, string key);
+// shared_ptr<int> getHeaderAsInt(const map<string, string>& headers, string key);
 
 /*
 This stream allows reading of files from a multipart/form-data request
@@ -15,12 +22,13 @@ class MultipartStream : public IOStream
 	map<string, string> mimeHeaders;
 	IOStream* stream;
 	string boundary;
-	int consumed;
+	int available;
 	int length;
-	bool isValid;
 
 public:
-	MultipartStream(IOStream* stream, string boundary);
+	MultipartStream(IOStream* stream, string boundary, int contentLength);
+
+	int getLength();
 
 	// Heredado vía IOStream
 	virtual uint32_t peek(uint8_t * buffer, uint32_t len) override;
@@ -34,6 +42,8 @@ public:
 class HttpRequestMsg
 {
 	IOStream* stream;
+	string multipartBoundary;
+	map<string, string> readMimePartHeaders();
 
 public:
 	HttpRequestMsg(IOStream *stream);
@@ -42,8 +52,8 @@ public:
 	string uri;
 	string method;
 
-	/*
-	*/
+	void setMultipartBoundary(string boundary);
+
 	shared_ptr<MultipartStream> readFile(const char* name);
 };
 
@@ -84,4 +94,6 @@ public:
 	void sendResponse(HttpResponseMsg &msg);
 
 };
+
+
 
