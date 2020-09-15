@@ -109,6 +109,11 @@ namespace NetSyncherTests
 			HttpProtocol http = HttpProtocol(&tr);
 			HttpRequestMsg req = http.readRequest();
 
+			int position = tr.position();
+			const int headerBytes = 230;
+
+			Assert::AreEqual(headerBytes, position);
+
 			// IOStream file = req.readFile("theFile");
 		}
 	};
