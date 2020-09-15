@@ -1,13 +1,15 @@
-#include <wx/wxprec.h>
-
 #ifndef WX_PRECOMP
 #include <wx/wx.h>
 #endif
 
+#include <chrono>
+#include "time.h"
+
+#include <wx/wxprec.h>
+#include "debugapi.h"
+
 #include "NetSyncher.h"
 #include "HttpProtocol.h"
-#include <chrono>
-#include "debugapi.h"
 
 NetSyncher::NetSyncher() {
 }
@@ -30,7 +32,7 @@ private:
 			return 0;
 		}
 
-		int read = socket->LastReadCount();
+		int read = socket->LastCount();
 		return read;
 	}
 
@@ -41,9 +43,19 @@ public:
 
 	virtual uint32_t peek(uint8_t * buffer, uint32_t len) override
 	{
-		socket->SetTimeout(5);
 		socket->Peek(buffer, len);
-		return postRead();
+		uint32_t bytesRead = postRead();
+
+		if (bytesRead == 0) {
+			// force peek by doing a blocking read and unread
+			bytesRead = this->read(buffer, len);
+
+			if (bytesRead != 0) {
+				this->socket->Unread(buffer, bytesRead);
+			}
+		}
+
+		return bytesRead;
 	}
 
 	// Heredado vía InputStream
@@ -136,8 +148,20 @@ void HttpServer::ListenLoop(int port) {
 			WxIOStream ioSocket(&socket);
 			HttpProtocol hp(&ioSocket);
 
-			// HttpRequestMsg req = hp.readRequest();
-			WritePiecesToFile(&ioSocket);
+			// WritePiecesToFile(&ioSocket);
+
+			HttpRequestMsg req = hp.readRequest();
+			shared_ptr<MultipartStream> file = req.readFile("filename");
+			int read = -1;
+			uint8_t buffer[4096];
+			time_t ts = time(NULL);
+			sprintf(tempLine, "video-%d.mp4", ts);
+			FILE* f = fopen(tempLine, "wb");
+			do {
+				read = file->read(buffer, 2048);
+				fwrite(buffer, sizeof(uint8_t), read, f);
+			} while (read != 0);
+			fclose(f);
 
 			HttpResponseMsg res;
 			res.setHeader("Content-Type", "application/json");
