@@ -31,6 +31,7 @@ namespace NetSyncherTests {
 	// Helper class that reads a network transmission previously recorded (reads buffer by buffer as received)
 	class TransmissionReader : public IOStream {
 		uint32_t lastFrameLength;
+		uint32_t totalRead;
 		FILE* f;
 
 		uint32_t readFromFile(uint8_t * buffer, uint32_t len, bool peek);
@@ -39,6 +40,8 @@ namespace NetSyncherTests {
 		virtual uint32_t peek(uint8_t * buffer, uint32_t len) override;
 		virtual uint32_t read(uint8_t * buffer, uint32_t len) override;
 		virtual uint32_t write(uint8_t * buffer, uint32_t len) override;
+
+		int position();
 	};
 
 }

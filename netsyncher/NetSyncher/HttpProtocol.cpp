@@ -82,7 +82,7 @@ string HttpProtocol::getHeadersFromStream()
 		read = this->iostream->peek((uint8_t*)buffer, BUFFER_LEN - 1);
 		if (read) {
 			// null terminate our buffer
-			buffer[read + 1] = '\0';
+			buffer[read] = '\0';
 
 			bytesToStringify = read;
 

@@ -83,11 +83,11 @@ namespace NetSyncherTests
 		long pos = ftell(this->f);
 		uint32_t frameLength = this->lastFrameLength;
 
-		if (this->lastFrameLength == -1) {
+		if (frameLength == -1) {
 			fread(&frameLength, sizeof(uint32_t), 1, this->f);
 		}
 
-		uint32_t bytesToRead = len < this->lastFrameLength ? len : this->lastFrameLength;
+		uint32_t bytesToRead = len < frameLength ? len : frameLength;
 		uint32_t bytesRead = fread(buffer, sizeof(uint8_t), bytesToRead, f);
 
 		if (bytesToRead != bytesRead) {
@@ -100,6 +100,7 @@ namespace NetSyncherTests
 			fseek(this->f, pos, SEEK_SET);
 		} else {
 			// advance position
+			this->totalRead += bytesRead;
 			this->lastFrameLength = frameLength - bytesRead;
 			if (this->lastFrameLength == 0) {
 				this->lastFrameLength = -1;
@@ -128,6 +129,11 @@ namespace NetSyncherTests
 	uint32_t TransmissionReader::write(uint8_t * buffer, uint32_t len)
 	{
 		return 0;
+	}
+
+	int TransmissionReader::position()
+	{
+		return totalRead;
 	}
 
 }
