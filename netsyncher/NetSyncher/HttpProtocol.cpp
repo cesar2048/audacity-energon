@@ -79,10 +79,15 @@ string HttpProtocol::getHeadersFromStream()
 	uint32_t read = 1, bytesToStringify = 1;
 
 	while (read != 0 && bytesToStringify == read) {
-		read = this->iostream->peek((uint8_t*)buffer, BUFFER_LEN);
+		read = this->iostream->peek((uint8_t*)buffer, BUFFER_LEN - 1);
 		if (read) {
+			// null terminate our buffer
+			buffer[read + 1] = '\0';
+
 			bytesToStringify = read;
-			char* endOfHeaders = strstr(buffer, CRLFx2);
+
+			uint32_t blankChars = strspn(buffer, "\t\r\n ");
+			char* endOfHeaders = strstr(buffer + blankChars, CRLFx2);
 			if (endOfHeaders != NULL) {
 				bytesToStringify = (endOfHeaders - buffer) + strlen(CRLFx2);
 			}
