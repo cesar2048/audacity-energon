@@ -12,7 +12,6 @@ uint32_t writeWord(uint8_t* outBuffer, uint32_t word, uint32_t pos) {
 }
 
 
-
 // -------
 
 WebsocketProtocol::WebsocketProtocol() {
@@ -25,7 +24,7 @@ WebsocketProtocol::~WebsocketProtocol() {
 	free(this->buffer);
 }
 
-char* WebsocketProtocol::CalculateSignature(char* clientKey) {
+char* WebsocketProtocol::CalculateSignature(const char* clientKey) {
 	char stringToHash[128];
 	char hashResult[SHA1_LEN_OUT_BYTES + 1];
 
@@ -77,7 +76,7 @@ uint32_t WebsocketProtocol::WriteFrame(WSOpcode opcode, uint8_t* inBuffer, uint3
 	 +---------------------------------------------------------------+
 	*/
 	// verify min buffer length
-	if (inSize < 16) {
+	if (outSize < 16) {
 		return -1;
 	}
 

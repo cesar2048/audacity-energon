@@ -53,6 +53,7 @@ public:
 	string method;
 
 	void setMultipartBoundary(string boundary);
+	shared_ptr<string> getHeader(string key);
 
 	shared_ptr<MultipartStream> readFile(const char* name);
 };

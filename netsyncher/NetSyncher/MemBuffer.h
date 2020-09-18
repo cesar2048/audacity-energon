@@ -7,12 +7,16 @@
 #define BUFFER_LEN 2048
 
 class Buffer {
+	bool selfAllocated;
+
 public:
 	uint32_t len;
 	uint8_t* buffer;
 
 	Buffer(uint32_t len, uint8_t* buffer);
 	Buffer(const char* str);
+	Buffer(uint32_t len);
+	~Buffer();
 
 	static Buffer fromString(const char* str);
 	Buffer operator+(unsigned int offset);

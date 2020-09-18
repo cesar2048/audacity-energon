@@ -142,5 +142,6 @@ namespace NetSyncherTests
 
 			compareBuffers(expected, MSG_LEN, msg->buffer, msg->length);
 		}
+
 	};
 }

@@ -2,7 +2,7 @@
 
 
 Buffer::Buffer(uint32_t len, uint8_t * buffer)
-	:len(len), buffer(buffer)
+	:len(len), buffer(buffer), selfAllocated(false)
 {
 }
 
@@ -10,6 +10,21 @@ Buffer::Buffer(const char * str)
 {
 	this->len = strlen(str);
 	this->buffer = (uint8_t*) str;
+	this->selfAllocated = false;
+}
+
+Buffer::Buffer(uint32_t len)
+{
+	this->selfAllocated = true;
+	this->len = len;
+	this->buffer = (uint8_t*)malloc(len);
+}
+
+Buffer::~Buffer()
+{
+	if (this->selfAllocated) {
+		free(this->buffer);
+	}
 }
 
 Buffer Buffer::fromString(const char* str)

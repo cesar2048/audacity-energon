@@ -10,6 +10,8 @@
 
 #include "NetSyncher.h"
 #include "HttpProtocol.h"
+#include "WebApp.h"
+#include "WebsocketProtocol.h"
 
 NetSyncher::NetSyncher() {
 }
@@ -21,7 +23,11 @@ void NetSyncher::Listen() {
 	wxMessageBox(Foobar);
 }
 
+
+
 // ------------
+
+
 class WxIOStream : public IOStream {
 private:
 	wxSocketBase *socket;
@@ -100,6 +106,9 @@ void WritePiecesToFile(const char *fileName, WxIOStream *ios) {
 	fclose(f);
 };
 
+
+
+
 // ---------------------------------
 
 HttpServer::HttpServer() {
@@ -115,78 +124,66 @@ HttpServer::~HttpServer() {
 }
 
 void HttpServer::Listen(int port) {
+	// create a new thread
+	// https://stackoverflow.com/a/10673671
+
 	wxIPV4address addr;
 	addr.AnyAddress();
 	addr.Service(port);
 
 	this->server = new wxSocketServer(addr, wxSOCKET_NONE);
-	this->serverThread = new std::thread(&HttpServer::ListenLoop, this, port); // https://stackoverflow.com/a/10673671
-	// this->ListenLoop(port);
+	this->serverThread = new std::thread(&HttpServer::ListenLoop, this, port);
 }
 
 void HttpServer::ListenLoop(int port) {
-
 	// how to print to VisualStudio debug console 
 	// https://stackoverflow.com/questions/1333527/how-do-i-print-to-the-debug-output-window-in-a-win32-app
-	//
+
 	// slow connection to localhost
 	// https://github.com/golang/go/issues/23366#issuecomment-374397983
 
-	int count = 0;
-	char tempLine[2048];
-	long dur = 0;
+	long elapsed = 0;
+	WebApp app;
+	WebsocketProtocol ws;
 
 	while (this->isServerThreadAlive) {
 		wxSocketBase socket;
 		bool hasConnection = this->server->WaitForAccept(0, 10);
 		if (hasConnection) {
 			OutputDebugString(L"Connection accepted\n");
-
 			this->server->AcceptWith(socket, false);
+
 			std::chrono::system_clock::time_point ini = std::chrono::system_clock::now();
 
 			WxIOStream ioSocket(&socket);
-			HttpProtocol hp(&ioSocket);
-
-			// sprintf(tempLine, "request-%d.mp4", count);
-			// WritePiecesToFile(tempLine, &ioSocket);
+			HttpProtocol http(&ioSocket);
 			
-			HttpRequestMsg req = hp.readRequest();
-			shared_ptr<MultipartStream> file = req.readFile("filename");
+			HttpRequestMsg req = http.readRequest();
+			auto upgrade = req.getHeader("upgrade");
+			if (upgrade != nullptr && *upgrade == "websocket") {
+				auto clientKey = req.getHeader("sec-websocket-key");
+				HttpResponseMsg res;
+				res.statusCode = 101;
+				res.setHeader("Upgrade", "websocket");
+				res.setHeader("Connection", "Upgrade");
+				res.setHeader("Sec-WebSocket-Protocol", "recording");
+				res.setHeader("Sec-WebSocket-Accept", ws.CalculateSignature(clientKey->c_str()));
+				http.sendResponse(res);
 
-			int totalRead = 0;
-			int totalExpected = 0;
-			if (file != nullptr) {
-				int read = -1;
-				totalExpected = file->getLength();
-
-				uint8_t buffer[4096];
-				time_t ts = time(NULL);
-				sprintf(tempLine, "video-%d.mp4", ts);
-				FILE* f = fopen(tempLine, "wb");
-				do {
-					read = file->read(buffer, 2048);
-					totalRead += read;
-					fwrite(buffer, sizeof(uint8_t), read, f);
-				} while (read != 0);
-				fclose(f);
+				Buffer b = Buffer::fromString("Hello world");
+				Buffer out(256);
+				uint32_t wsBytes = ws.WriteFrame(WSOpcode::TextFrame, b.buffer, b.len, out.buffer, out.len, false);
+				socket.Write(out.buffer, wsBytes);
+			}
+			else {
+				auto res = app.onRequest(req);
+				http.sendResponse(*res);
+				socket.Close();
 			}
 
-			HttpResponseMsg res;
-			res.setHeader("Content-Type", "application/json");
-			sprintf_s(tempLine, 2048, "{\"Hello\":\"world\",\n"
-				"\"Count\":%d,\n"
-				"\"Duration\":%d,"
-				"\"Received\":%d,"
-				"\"Expected\":%d"
-				"\n}", count++, dur, totalRead, totalExpected);
-			res.write(tempLine);
-
-			hp.sendResponse(res);
-			socket.Close();
 
 			std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
-			dur = std::chrono::duration_cast<std::chrono::milliseconds>(end - ini).count();
+			elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - ini).count();
 		}
 	}
 }

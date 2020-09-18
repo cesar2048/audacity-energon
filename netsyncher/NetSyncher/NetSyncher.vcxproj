@@ -171,6 +171,7 @@
     <ClCompile Include="MemBuffer.cpp" />
     <ClCompile Include="NetSyncher.cpp" />
     <ClCompile Include="sha1.c" />
+    <ClCompile Include="WebApp.cpp" />
     <ClCompile Include="WebsocketProtocol.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -179,6 +180,7 @@
     <ClInclude Include="MemBuffer.h" />
     <ClInclude Include="NetSyncher.h" />
     <ClInclude Include="sha1.h" />
+    <ClInclude Include="WebApp.h" />
     <ClInclude Include="WebsocketProtocol.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

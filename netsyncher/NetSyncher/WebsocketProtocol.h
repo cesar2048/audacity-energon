@@ -39,6 +39,11 @@ typedef struct {
 	uint32_t length;
 } WS_MSG;
 
+/**
+Websocket implementation
+
+RFC reference: https://tools.ietf.org/html/rfc6455#section-1.3
+*/
 class WebsocketProtocol
 {
 public:
@@ -47,7 +52,7 @@ public:
 
 	// Generates the server key signature
 	// returns a pointer to a buffer with the signature
-	char* CalculateSignature(char* clientKey);
+	char* CalculateSignature(const char* clientKey);
 	
 	// Encodes a websocket frame and writes it into the provided buffer
 	// returns how many bytes were actually written

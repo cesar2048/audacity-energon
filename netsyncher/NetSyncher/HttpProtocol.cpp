@@ -262,6 +262,11 @@ void HttpRequestMsg::setMultipartBoundary(string boundary)
 	this->multipartBoundary = boundary;
 }
 
+shared_ptr<string> HttpRequestMsg::getHeader(string key)
+{
+	return getMapValue(this->headers, key);
+}
+
 map<string, string> HttpRequestMsg::readMimePartHeaders()
 {
 	string mimeHeadersText = readHeadersBlock(this->stream);
