@@ -144,6 +144,7 @@ namespace NetSyncherTests
 			// assert
 			shared_ptr<MultipartStream> file = req.readFile("theFile");
 			Assert::IsTrue(file == nullptr);
+			Assert::AreEqual(iss.numberOfReads, 1, L"Should not have attempted to read again for mime headers");
 		}
 	};
 }

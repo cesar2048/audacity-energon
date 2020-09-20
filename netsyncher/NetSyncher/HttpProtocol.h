@@ -11,6 +11,9 @@
 
 using namespace std;
 
+// ---------- functions
+void DebugLog(const char *format...);
+
 // shared_ptr<string> getMapValue(const map<string, string>& headers, string key);
 // shared_ptr<int> getHeaderAsInt(const map<string, string>& headers, string key);
 

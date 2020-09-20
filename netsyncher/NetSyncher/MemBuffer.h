@@ -1,7 +1,6 @@
 #pragma once
 
 #include <memory>
-
 #include <functional>
 
 #define BUFFER_LEN 2048

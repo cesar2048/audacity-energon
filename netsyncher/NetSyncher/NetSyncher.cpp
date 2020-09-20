@@ -6,7 +6,6 @@
 #include "time.h"
 
 #include <wx/wxprec.h>
-#include "debugapi.h"
 
 #include "NetSyncher.h"
 #include "HttpProtocol.h"
@@ -52,13 +51,19 @@ public:
 		socket->Peek(buffer, len);
 		uint32_t bytesRead = postRead();
 		
+		
 		if (bytesRead == 0) {
+			DebugLog("WxIOStream::peek() got %i bytes, reading now\n", bytesRead);
 			// force peek by doing a blocking read and unread
 			bytesRead = this->read(buffer, len);
 
 			if (bytesRead != 0) {
 				this->socket->Unread(buffer, bytesRead);
 			}
+			DebugLog("WxIOStream::peek()=>read() got %i bytes (send to unread)\n", bytesRead);
+		}
+		else {
+			DebugLog("WxIOStream::peek() got %i bytes\n", bytesRead);
 		}
 
 		return bytesRead;
@@ -69,12 +74,15 @@ public:
 	{
 		socket->SetTimeout(5);
 		socket->Read(buffer, len);
-		return postRead();
+		uint32_t read = this->postRead();
+		DebugLog("WxIOStream::read() got %i bytes\n", read);
+		return read;
 	}
 
 	// Heredado vía IOStream
 	virtual uint32_t write(uint8_t * buffer, uint32_t len) override
 	{
+		DebugLog("WxIOStream::write() %i bytes\n", len);
 		this->socket->Write(buffer, len);
 		return this->socket->LastWriteCount();
 	}
@@ -150,7 +158,7 @@ void HttpServer::ListenLoop(int port) {
 		wxSocketBase socket;
 		bool hasConnection = this->server->WaitForAccept(0, 10);
 		if (hasConnection) {
-			OutputDebugString(L"Connection accepted\n");
+			DebugLog("Connection accepted\n");
 			this->server->AcceptWith(socket, false);
 
 			std::chrono::system_clock::time_point ini = std::chrono::system_clock::now();

@@ -19,6 +19,8 @@ namespace NetSyncherTests {
 
 		char* inputBuffer;
 		int inCursor;
+		int numberOfReads;
+
 		MemBuffer outBuffer;
 		StrInputStream(const char *str);
 		~StrInputStream();

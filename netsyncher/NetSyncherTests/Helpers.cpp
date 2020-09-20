@@ -20,6 +20,7 @@ namespace NetSyncherTests
 	StrInputStream::StrInputStream(const char *str) {
 		size_t bufferSize = strlen(str) + 1;
 
+		this->numberOfReads = 0;
 		this->inCursor = 0;
 		this->inputBuffer = (char*)malloc(bufferSize);
 
@@ -52,6 +53,7 @@ namespace NetSyncherTests
 	{
 		uint32_t bytesRead = this->peek(buffer, len);
 		this->inCursor += bytesRead;
+		this->numberOfReads += 1;
 		return bytesRead;
 	}
 

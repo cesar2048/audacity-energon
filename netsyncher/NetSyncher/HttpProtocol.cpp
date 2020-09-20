@@ -1,4 +1,9 @@
 #include "HttpProtocol.h"
+#include <stdarg.h>
+#include <chrono>
+
+#include <windows.h>
+#include <debugapi.h>
 
 // -------------- functions -------------------------
 
@@ -339,4 +344,27 @@ uint32_t MultipartStream::read(uint8_t * buffer, uint32_t len)
 uint32_t MultipartStream::write(uint8_t * buffer, uint32_t len)
 {
 	return uint32_t();
+}
+
+std::chrono::system_clock::time_point last;
+void DebugLog(const char *format ...)
+{
+	char buffer[2048];
+	char formatBuffer[2048];
+	va_list arg;
+
+	std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
+	long elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last).count();
+	last = now;
+	if (elapsed < 0) {
+		elapsed = 0;
+	}
+
+	sprintf(formatBuffer, "[%5d], %s", elapsed, format);
+	
+	va_start(arg, format);
+	vsprintf(buffer, formatBuffer, arg);
+	va_end(arg);
+
+	OutputDebugStringA(buffer);	
 }
