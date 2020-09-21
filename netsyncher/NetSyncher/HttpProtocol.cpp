@@ -8,10 +8,6 @@
 
 // ------------- IHttpServer ---------------------
 
-HttpServer::HttpServer(INetwork * network, IRouteHandler * handler)
-	:network(network), handler(handler), isServerThreadAlive(true)
-{
-}
 
 HttpServer::~HttpServer() {
 	if (this->serverThread) {
@@ -21,19 +17,28 @@ HttpServer::~HttpServer() {
 	}
 }
 
+void HttpServer::SetHandlers(INetwork * network) {
+	this->network = network;
+}
+
+void HttpServer::SetRouteHandler(IRouteHandler * handler) {
+	this->handler = handler;
+}
+
 void HttpServer::Listen(int port) {
 	// how to create a new thread
 	// https://stackoverflow.com/a/10673671
 
 	// TODO: handle unable to bind error
+	this->isServerThreadAlive = true;
 	this->network->Listen(port);
-	this->serverThread = new std::thread(&HttpServer::AcceptLoop, this/*, additional args */);
+	this->serverThread = new std::thread(&HttpServer::HandleLoop, this/*, additional args */);
 }
 
 
-void HttpServer::AcceptLoop(/* additional args */) {
+void HttpServer::HandleLoop(/* additional args */) {
 	// how to print to VisualStudio debug console 
-	// https://stackoverflow.com/questions/1333527/how-do-i-print-to-the-debug-output-window-in-a-win32-app
+	// https://stackoverflow.com/questions/1333527/how-do-i-print-to-the-debug-output-window-in-a-win32-server
 
 	// slow connection to localhost
 	// https://github.com/golang/go/issues/23366#issuecomment-374397983
@@ -57,10 +62,9 @@ void HttpServer::AcceptLoop(/* additional args */) {
 			http.sendResponse(*res);
 
 			// delegate connection to the handler
-			// TODO: start a new thread
-			handler->Upgrade(stream.get());
+			handler->HandleStream(stream);
 		} else {
-			auto res = this->handler->onRequest(&req);
+			auto res = this->handler->OnRequest(&req);
 			http.sendResponse(*res);
 			stream->close();
 
@@ -70,7 +74,8 @@ void HttpServer::AcceptLoop(/* additional args */) {
 	}
 }
 
-void HttpServer::registerUpdateHandler(const string& key, IUpgradeHandler* handler)
+
+void HttpServer::RegisterUpdateHandler(const string& key, IUpgradeHandler* handler)
 {
 	if (handler != nullptr) {
 		this->upgradeHandlers[key] = handler;

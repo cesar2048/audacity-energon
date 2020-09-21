@@ -28,6 +28,7 @@ namespace NetSyncherTests {
 		virtual uint32_t peek(uint8_t * buffer, uint32_t len) override;
 		virtual uint32_t read(uint8_t * buffer, uint32_t len) override;
 		virtual uint32_t write(uint8_t* buffer, uint32_t len) override;
+		virtual void close() override;
 	};
 
 	// Helper class that reads a network transmission previously recorded (reads buffer by buffer as received)
@@ -42,6 +43,7 @@ namespace NetSyncherTests {
 		virtual uint32_t peek(uint8_t * buffer, uint32_t len) override;
 		virtual uint32_t read(uint8_t * buffer, uint32_t len) override;
 		virtual uint32_t write(uint8_t * buffer, uint32_t len) override;
+		virtual void close() override;
 
 		int position();
 	};

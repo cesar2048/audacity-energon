@@ -20,8 +20,11 @@ class MyFrame : public wxFrame {
 	public:
 		MyFrame(const wxString& title, const wxPoint& pos, const wxSize& size);
 	private:
-		NetSyncher *ns;
-		WebApp* app;
+		HttpServer* server;
+		WebsocketServer* wsServer;
+
+		WebApp app;
+		NetSyncher ns;
 
 		void OnStartServer(wxCommandEvent& event);
 		void OnExit(wxCommandEvent& event);
@@ -71,13 +74,11 @@ MyFrame::MyFrame(const wxString& title, const wxPoint& pos, const wxSize& size)
 
 	CreateStatusBar();
 	SetStatusText("Welcome to wxWidgets!");
-
-	this->ns = new NetSyncher();
 }
 
 void MyFrame::OnExit(wxCommandEvent& event) {
 	Close(true);
-	delete this->ns;
+
 }
 
 void MyFrame::OnAbout(wxCommandEvent& event) {
@@ -86,10 +87,12 @@ void MyFrame::OnAbout(wxCommandEvent& event) {
 };
 
 void MyFrame::OnStartServer(wxCommandEvent& event) {
-	this->app = new WebApp();
-	this->ns = new NetSyncher();
+	this->wsServer = new WebsocketServer(&this->app);
 
-	this->app->Listen(8080);
+	this->server = AllocateWebServer();
+	this->server->SetRouteHandler(&this->app);
+	this->server->RegisterUpdateHandler("websocket", this->wsServer);
+	this->server->Listen(8080);
 
 	wxLogMessage("Server started!");
 };

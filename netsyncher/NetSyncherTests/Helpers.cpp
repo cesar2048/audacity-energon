@@ -67,6 +67,11 @@ namespace NetSyncherTests
 		return 0;
 	}
 
+	void StrInputStream::close()
+	{
+		// nothing to do here
+	}
+
 
 	// ------------------- TransmissionReader -------------------
 
@@ -136,6 +141,11 @@ namespace NetSyncherTests
 	int TransmissionReader::position()
 	{
 		return totalRead;
+	}
+
+	void TransmissionReader::close()
+	{
+		// nothing to do here
 	}
 
 }

@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "WebsocketProtocol.h"
+#include <thread>
 
 uint32_t writeWord(uint8_t* outBuffer, uint32_t word, uint32_t pos) {
 	outBuffer[pos++] = word & 0xFF;
@@ -187,6 +188,11 @@ std::shared_ptr<WS_MSG> WebsocketProtocol::ReadFrame(uint8_t * buffer, uint32_t 
 // ----------------------- WebsocketServer ---------------------------
 
 
+WebsocketServer::WebsocketServer(IMessageHandler * handler)
+	:handler(handler)
+{
+}
+
 shared_ptr<HttpResponseMsg> WebsocketServer::AcceptUpgrade(HttpRequestMsg* req)
 {
 	auto clientKey = req->getHeader("sec-websocket-key");
@@ -200,11 +206,25 @@ shared_ptr<HttpResponseMsg> WebsocketServer::AcceptUpgrade(HttpRequestMsg* req)
 	return shared_ptr<HttpResponseMsg>(res);
 }
 
-void WebsocketServer::Upgrade(IOStream * stream)
+void WebsocketServer::HandleStream(shared_ptr<IOStream> stream)
 {
+	this->serverThread = new std::thread(&WebsocketServer::HandleLoop, this, stream);
+
 	Buffer b = Buffer::fromString("Hello world");
 	Buffer out(256);
 	uint32_t wsBytes = this->protocol.WriteFrame(WSOpcode::TextFrame, b.buffer, b.len, out.buffer, out.len, false);
-
 	stream->write(out.buffer, wsBytes);
+}
+
+void WebsocketServer::HandleLoop(shared_ptr<IOStream> stream)
+{
+	while (true) {
+		Buffer in(2048);
+		stream->read(in.buffer, in.len);
+
+		auto msg = this->protocol.ReadFrame(in.buffer, in.len);
+		if (msg->opcode == WSOpcode::TextFrame) {
+			this->handler->OnMessage(msg->buffer, msg->length);
+		}
+	}
 }

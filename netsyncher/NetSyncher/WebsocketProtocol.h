@@ -67,12 +67,25 @@ private:
 	size_t bufferLength;
 };
 
+
 class WebsocketServer : public HttpServer::IUpgradeHandler
 {
-	WebsocketProtocol protocol;
-
 public:
+	class IMessageHandler {
+	public:
+		virtual void OnMessage(uint8_t* buffer, uint32_t len) = 0;
+	};
+
+	WebsocketServer(IMessageHandler* handler);
+
 	// Heredado vía IUpgradeHandler
 	virtual shared_ptr<HttpResponseMsg> AcceptUpgrade(HttpRequestMsg* msg) override;
-	virtual void Upgrade(IOStream * stream) override;
+	virtual void HandleStream(shared_ptr<IOStream> stream) override;
+
+private:
+	void HandleLoop(shared_ptr<IOStream> stream);
+
+	std::thread* serverThread;
+	WebsocketProtocol protocol;
+	IMessageHandler* handler;
 };

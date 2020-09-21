@@ -127,7 +127,7 @@ public:
 	{
 		public:
 			virtual shared_ptr<HttpResponseMsg> AcceptUpgrade(HttpRequestMsg* req) = 0;
-			virtual void Upgrade(IOStream* stream) = 0;
+			virtual void HandleStream(shared_ptr<IOStream> stream) = 0;
 	};
 
 	/// Network interface
@@ -140,18 +140,19 @@ public:
 	/// Route handler interface
 	class IRouteHandler {
 		public:
-			virtual shared_ptr<HttpResponseMsg> onRequest(HttpRequestMsg* req) = 0;
+			virtual shared_ptr<HttpResponseMsg> OnRequest(HttpRequestMsg* req) = 0;
 	};
 
-	HttpServer(INetwork* network, IRouteHandler* handler);
+	
 	~HttpServer();
-
+	void SetHandlers(INetwork* network);
+	void SetRouteHandler(IRouteHandler* handler);
 	void Listen(int port);
-	void registerUpdateHandler(const string& key, IUpgradeHandler* handler);
+	void RegisterUpdateHandler(const string& key, IUpgradeHandler* handler);
 	IUpgradeHandler* getUpdateHandler(shared_ptr<string> key);
 
 private:
-	void AcceptLoop();
+	void HandleLoop();
 
 	INetwork* network;
 	IRouteHandler* handler;

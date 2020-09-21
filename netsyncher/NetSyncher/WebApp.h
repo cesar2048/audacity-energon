@@ -12,18 +12,13 @@
 
 using namespace std; 
 
-class WebApp : public HttpServer::IRouteHandler
+HttpServer* AllocateWebServer();
+
+class WebApp : public HttpServer::IRouteHandler, public WebsocketServer::IMessageHandler
 {
-	HttpServer::INetwork* network;
-	HttpServer* server;
-	WebsocketServer* wsServer;
-
-public:
-	WebApp();
-
-	void Listen(int port);
-
 	// Heredado vía IRouteHandler
-	virtual shared_ptr<HttpResponseMsg> onRequest(HttpRequestMsg* req) override;
-};
+	virtual shared_ptr<HttpResponseMsg> OnRequest(HttpRequestMsg* req) override;
 
+	// Heredado vía IMessageHandler
+	virtual void OnMessage(uint8_t * buffer, uint32_t len) override;
+};

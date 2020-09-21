@@ -1,6 +1,8 @@
 #include "WebApp.h"
 
-// ------------
+
+// ------------ Http server WX implementations ---------------------
+
 
 class WxIOStream : public IOStream {
 private:
@@ -104,9 +106,19 @@ public:
 	}
 };
 
+class WxWebServer : public HttpServer
+{
+	WebsocketServer* wsServer;
+
+public:
+	WxWebServer() {
+		WxNetwork* networkHandler = new WxNetwork();
+		this->SetHandlers(networkHandler);
+	}
+};
+
 
 // ---------------------------------
-
 
 void WritePiecesToFile(const char *fileName, WxIOStream *ios) {
 	const uint32_t KiloByte = 1024;
@@ -132,25 +144,16 @@ void WritePiecesToFile(const char *fileName, WxIOStream *ios) {
 	fclose(f);
 };
 
-
-// ---------------------------------
-
-
-WebApp::WebApp()
+HttpServer* AllocateWebServer()
 {
-	this->network = new WxNetwork();
-	this->server = new HttpServer(network, this);
-	this->wsServer = new WebsocketServer();
-
-	this->server->registerUpdateHandler("websocket", this->wsServer);
+	return new WxWebServer();
 }
 
-void WebApp::Listen(int port)
-{
-	this->server->Listen(port);
-}
 
-shared_ptr<HttpResponseMsg> WebApp::onRequest(HttpRequestMsg* req)
+// ------------ WebApplication ---------------------
+
+
+shared_ptr<HttpResponseMsg> WebApp::OnRequest(HttpRequestMsg* req)
 {
 	char tempLine[2048];
 	shared_ptr<MultipartStream> file = req->readFile("filename");
@@ -183,85 +186,9 @@ shared_ptr<HttpResponseMsg> WebApp::onRequest(HttpRequestMsg* req)
 	return shared_ptr<HttpResponseMsg>(res);
 }
 
-
-
-/*
-
-void HttpServer::Listen(int port) {
-	// create a new thread
-	// https://stackoverflow.com/a/10673671
-
-	wxIPV4address addr;
-	addr.AnyAddress();
-	addr.Service(port);
-
-	this->server = new wxSocketServer(addr, wxSOCKET_NONE);
-	this->serverThread = new std::thread(&HttpServer::ListenLoop, this, port);
-}
-
-void HttpServer::registerUpdateHandler(const char * key, shared_ptr<IUpgradeHandler> handler)
+void WebApp::OnMessage(uint8_t* buffer, uint32_t len)
 {
-	this->upgradeHandlers[key] = handler;
+	string str = string((char*) buffer, len);
+	DebugLog("WS> %s\n", str.c_str());
 }
 
-
-void HttpServer::ListenLoop(int port) {
-	// how to print to VisualStudio debug console 
-	// https://stackoverflow.com/questions/1333527/how-do-i-print-to-the-debug-output-window-in-a-win32-app
-
-	// slow connection to localhost
-	// https://github.com/golang/go/issues/23366#issuecomment-374397983
-
-	long elapsed = 0;
-	WebsocketProtocol ws;
-	WebApp app;
-
-	while (this->isServerThreadAlive) {
-		wxSocketBase socket;
-		bool hasConnection = this->server->WaitForAccept(0, 10);
-		if (hasConnection) {
-			DebugLog("Connection accepted\n");
-			this->server->AcceptWith(socket, false);
-
-			std::chrono::system_clock::time_point ini = std::chrono::system_clock::now();
-
-			WxIOStream ioSocket(&socket);
-			HttpProtocol http(&ioSocket);
-
-			HttpRequestMsg req = http.readRequest();
-			auto upgrade = req.getHeader("upgrade");
-			if (upgrade != nullptr && *upgrade == "websocket") {
-				auto handler = this->upgradeHandlers.find(*upgrade);
-				if (handler != this->upgradeHandlers.end()) {
-					handler->second->Upgrade(&http, &ioSocket);
-				}
-			}
-			else {
-				auto res = app.onRequest(req);
-				http.sendResponse(*res);
-				socket.Close();
-			}
-
-
-			std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
-			elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - ini).count();
-		}
-	}
-}
-*/
-
-/*
-void WebApp::Upgrade(HttpProtocol* http,  HttpRequestMsg *req, IOStream * stream)
-{
-	auto clientKey = req->getHeader("sec-websocket-key");
-	HttpResponseMsg res;
-	res.statusCode = 101;
-	res.setHeader("Upgrade", "websocket");
-	res.setHeader("Connection", "Upgrade");
-	res.setHeader("Sec-WebSocket-Protocol", "recording");
-	res.setHeader("Sec-WebSocket-Accept", ws.CalculateSignature(clientKey->c_str()));
-	http->sendResponse(res);
-
-	stream->write(out.buffer, wsBytes);
-}
-*/
