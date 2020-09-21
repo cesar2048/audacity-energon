@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <memory>
+#include "HttpProtocol.h"
 
 /**
 * https://arne-mertz.de/2018/10/calling-cpp-code-from-c-with-extern-c/
@@ -66,3 +67,12 @@ private:
 	size_t bufferLength;
 };
 
+class WebsocketServer : public HttpServer::IUpgradeHandler
+{
+	WebsocketProtocol protocol;
+
+public:
+	// Heredado vía IUpgradeHandler
+	virtual shared_ptr<HttpResponseMsg> AcceptUpgrade(HttpRequestMsg* msg) override;
+	virtual void Upgrade(IOStream * stream) override;
+};

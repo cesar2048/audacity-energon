@@ -118,16 +118,6 @@ uint8_t * MemBuffer::_getBuffer(uint32_t * outSize)
 }
 
 
-// -------------- IOStream -------------------------
-
-
-uint32_t IOStream::write(const char * string)
-{
-	uint32_t len = strlen(string);
-	uint32_t res = this->write((uint8_t*)string, len);
-	return res;
-}
-
 
 // -------------- util methods -------------------------
 
@@ -170,37 +160,4 @@ int findByteSpan(Buffer have, Buffer bytes)
 	return lastPos;
 }
 
-std::shared_ptr<MemBuffer> readUntilPosition(IOStream* iostream, const std::function<int(Buffer)>& getEndPos)
-{
-	std::shared_ptr<MemBuffer> outBuffer(new MemBuffer());
-	uint8_t buffer[BUFFER_LEN];
-	uint32_t readBytes = 1;
-	int endFoundHere = -1;
-
-	while (readBytes != 0 && endFoundHere == -1) {
-		readBytes = iostream->peek(buffer, BUFFER_LEN);
-
-		endFoundHere = getEndPos({ BUFFER_LEN, buffer });
-		if (endFoundHere != -1) {
-			readBytes = endFoundHere;
-		}
-
-		iostream->read(buffer, readBytes); // advance stream
-		outBuffer->write(buffer, readBytes); // save to memory
-	}
-
-	return outBuffer;
-}
-
-
-
-// reads from the stream until the end is found
-// the end string is part of the returned buffer
-std::shared_ptr<MemBuffer> readUntil(IOStream* iostream, uint8_t* endSequence, uint32_t endLength)
-{
-	return readUntilPosition(iostream, [=](Buffer b) {
-		int found = findSequenceInBuffer(b.buffer, b.len, endSequence, endLength);
-		return (found == -1) ? -1 : found + b.len;
-	});
-}
 

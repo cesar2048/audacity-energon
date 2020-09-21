@@ -4,36 +4,43 @@
 #include <iostream>
 
 #include "NetSyncher.h"
+#include "WebApp.h"
+
 class MyApp : public wxApp {
-public:
-	virtual bool OnInit();
+	public:
+		virtual bool OnInit();
+	};
+
+	enum {
+		ID_Hello = 1
 };
 
-enum {
-	ID_Hello = 1
-};
 
 class MyFrame : public wxFrame {
-public:
-	MyFrame(const wxString& title, const wxPoint& pos, const wxSize& size);
-private:
-	NetSyncher *ns;
+	public:
+		MyFrame(const wxString& title, const wxPoint& pos, const wxSize& size);
+	private:
+		NetSyncher *ns;
+		WebApp* app;
 
-	void OnHello(wxCommandEvent& event);
-	void OnExit(wxCommandEvent& event);
-	void OnAbout(wxCommandEvent& event);
+		void OnStartServer(wxCommandEvent& event);
+		void OnExit(wxCommandEvent& event);
+		void OnAbout(wxCommandEvent& event);
 
-	wxDECLARE_EVENT_TABLE();
+		wxDECLARE_EVENT_TABLE();
 };
 
 wxBEGIN_EVENT_TABLE(MyFrame, wxFrame)
-EVT_MENU(ID_Hello, MyFrame::OnHello)
-EVT_MENU(wxID_EXIT, MyFrame::OnExit)
-EVT_MENU(wxID_ABOUT, MyFrame::OnAbout)
+	EVT_MENU(ID_Hello, MyFrame::OnStartServer)
+	EVT_MENU(wxID_EXIT, MyFrame::OnExit)
+	EVT_MENU(wxID_ABOUT, MyFrame::OnAbout)
 wxEND_EVENT_TABLE()
 
-
 wxIMPLEMENT_APP(MyApp);
+
+
+// ------------ MyApp ---------------------
+
 
 bool MyApp::OnInit() {
 	MyFrame *frame = new MyFrame("Hello world", wxPoint(50, 50), wxSize(450, 340));
@@ -41,11 +48,15 @@ bool MyApp::OnInit() {
 	return true;
 }
 
+
+// ------------ MyFrame ---------------------
+
+
 MyFrame::MyFrame(const wxString& title, const wxPoint& pos, const wxSize& size)
 	: wxFrame(NULL, wxID_ANY, title, pos, size)
 {
 	wxMenu *menuFile = new wxMenu;
-	menuFile->Append(ID_Hello, "&Hello... \tCtrl-H", "Help string shown in status bar from this menu item");
+	menuFile->Append(ID_Hello, "&Start... \tCtrl-H", "Help string shown in status bar from this menu item");
 	menuFile->AppendSeparator();
 	menuFile->Append(wxID_EXIT);
 
@@ -74,8 +85,12 @@ void MyFrame::OnAbout(wxCommandEvent& event) {
 		"About Hello World", wxOK | wxICON_INFORMATION);
 };
 
-void MyFrame::OnHello(wxCommandEvent& event) {
-	wxLogMessage("Hello world from wxWidgets!");
-	ns->Listen();
+void MyFrame::OnStartServer(wxCommandEvent& event) {
+	this->app = new WebApp();
+	this->ns = new NetSyncher();
+
+	this->app->Listen(8080);
+
+	wxLogMessage("Server started!");
 };
 

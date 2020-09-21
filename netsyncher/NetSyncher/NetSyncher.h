@@ -1,36 +1,28 @@
 #pragma once
 
-#include <thread>
-#include <chrono>
-
-#include <wx/wxprec.h>
-#include <wx/socket.h>
-
 #ifndef WX_PRECOMP
 	#include <wx/wx.h>
 #endif
+#include <memory>
 
-class HttpServer
-{
-public:
-	HttpServer();
-	~HttpServer();
-	void Listen(int port);
-private:
-	wxSocketServer* server;
-	std::thread* serverThread;
-	bool isServerThreadAlive;
+using namespace std;
 
-	void ListenLoop(int port);
-};
-
-
+/// High level net synchronizer application
 class NetSyncher
 {
 public:
+	class IClientDevice
+	{
+	public:
+		virtual void startRecording() = 0;
+		virtual void stopRecording() = 0;
+	};
+
+	shared_ptr<IClientDevice> client;
+
 	NetSyncher();
-	void Listen();
-private:
-	HttpServer server;
+	void onStartRecording();
+	void onStopRecording();
+	bool acceptClient(shared_ptr<IClientDevice> client);
 };
 

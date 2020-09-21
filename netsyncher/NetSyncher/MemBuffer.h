@@ -21,32 +21,6 @@ public:
 	Buffer operator+(unsigned int offset);
 };
 
-class IOStream {
-public:
-	/*
-	Peek into the stream without advancing the buffer and deleting the information
-	*/
-	virtual uint32_t peek(uint8_t* buffer, uint32_t len) = 0;
-
-	/*
-	Reads up to len bytes into buffer.
-	Returns the number of read bytes
-	*/
-	virtual uint32_t read(uint8_t* buffer, uint32_t len) = 0;
-
-	/**
-	Attempts to write as much as len bytes to the stream.
-	Returns the number of bytes actually written
-	*/
-	virtual uint32_t write(uint8_t* buffer, uint32_t len) = 0;
-
-	/**
-	Attempts to write string to the stream
-	returns the number of bytes actually written
-	*/
-	virtual uint32_t write(const char* string);
-};
-
 /**
 MemBuffer
 */
@@ -87,9 +61,3 @@ int findSequenceInBuffer(Buffer have, Buffer sequenceToFind);
 
 int findByteSpan(Buffer have, Buffer bytes);
 
-// consumes from the stream until the position returned by the lambda function,
-// or until there is no more bytes available
-std::shared_ptr<MemBuffer> readUntilPosition(IOStream* iostream, const std::function<int(Buffer)>& getEndPos);
-
-// reads from the stream until the endSequence is found, or until there is no more in the stream
-std::shared_ptr<MemBuffer> readUntil(IOStream* iostream, uint8_t* endSequence, uint32_t endLength);

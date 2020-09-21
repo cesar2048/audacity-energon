@@ -180,6 +180,7 @@
     <ClInclude Include="MemBuffer.h" />
     <ClInclude Include="NetSyncher.h" />
     <ClInclude Include="sha1.h" />
+    <ClInclude Include="stringextension.h" />
     <ClInclude Include="WebApp.h" />
     <ClInclude Include="WebsocketProtocol.h" />
   </ItemGroup>

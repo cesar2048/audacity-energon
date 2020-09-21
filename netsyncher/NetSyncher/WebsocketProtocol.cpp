@@ -183,3 +183,28 @@ std::shared_ptr<WS_MSG> WebsocketProtocol::ReadFrame(uint8_t * buffer, uint32_t 
 	return frame;
 }
 
+
+// ----------------------- WebsocketServer ---------------------------
+
+
+shared_ptr<HttpResponseMsg> WebsocketServer::AcceptUpgrade(HttpRequestMsg* req)
+{
+	auto clientKey = req->getHeader("sec-websocket-key");
+	HttpResponseMsg* res = new HttpResponseMsg();
+	res->statusCode = 101;
+	res->setHeader("Upgrade", "websocket");
+	res->setHeader("Connection", "Upgrade");
+	res->setHeader("Sec-WebSocket-Protocol", "recording");
+	res->setHeader("Sec-WebSocket-Accept", this->protocol.CalculateSignature(clientKey->c_str()));
+
+	return shared_ptr<HttpResponseMsg>(res);
+}
+
+void WebsocketServer::Upgrade(IOStream * stream)
+{
+	Buffer b = Buffer::fromString("Hello world");
+	Buffer out(256);
+	uint32_t wsBytes = this->protocol.WriteFrame(WSOpcode::TextFrame, b.buffer, b.len, out.buffer, out.len, false);
+
+	stream->write(out.buffer, wsBytes);
+}
