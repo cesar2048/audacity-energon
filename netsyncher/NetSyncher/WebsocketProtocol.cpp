@@ -193,6 +193,15 @@ WebsocketServer::WebsocketServer(IMessageHandler * handler)
 {
 }
 
+void WebsocketServer::Send(uint8_t * buffer, uint32_t len)
+{
+	if (this->stream != nullptr) {
+		Buffer out(256);
+		uint32_t wsBytes = this->protocol.WriteFrame(WSOpcode::TextFrame, buffer, len, out.buffer, out.len, false);
+		stream->write(out.buffer, wsBytes);
+	}
+}
+
 shared_ptr<HttpResponseMsg> WebsocketServer::AcceptUpgrade(HttpRequestMsg* req)
 {
 	auto clientKey = req->getHeader("sec-websocket-key");
@@ -208,6 +217,7 @@ shared_ptr<HttpResponseMsg> WebsocketServer::AcceptUpgrade(HttpRequestMsg* req)
 
 void WebsocketServer::HandleStream(shared_ptr<IOStream> stream)
 {
+	this->stream = stream;
 	this->serverThread = new std::thread(&WebsocketServer::HandleLoop, this, stream);
 
 	Buffer b = Buffer::fromString("Hello world");

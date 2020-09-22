@@ -77,6 +77,7 @@ public:
 	};
 
 	WebsocketServer(IMessageHandler* handler);
+	void Send(uint8_t* buffer, uint32_t len);
 
 	// Heredado vía IUpgradeHandler
 	virtual shared_ptr<HttpResponseMsg> AcceptUpgrade(HttpRequestMsg* msg) override;
@@ -85,7 +86,9 @@ public:
 private:
 	void HandleLoop(shared_ptr<IOStream> stream);
 
-	std::thread* serverThread;
 	WebsocketProtocol protocol;
 	IMessageHandler* handler;
+
+	std::thread* serverThread;
+	shared_ptr<IOStream> stream;
 };

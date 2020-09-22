@@ -14,15 +14,15 @@ public:
 	class IClientDevice
 	{
 	public:
-		virtual void startRecording() = 0;
-		virtual void stopRecording() = 0;
+		virtual void onStartRecording() = 0;
+		virtual void onStopRecording() = 0;
 	};
 
 	shared_ptr<IClientDevice> client;
 
 	NetSyncher();
-	void onStartRecording();
-	void onStopRecording();
+	void StartRecording();
+	void StopRecording();
 	bool acceptClient(shared_ptr<IClientDevice> client);
 };
 

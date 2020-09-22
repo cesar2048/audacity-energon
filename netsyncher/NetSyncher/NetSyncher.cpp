@@ -3,17 +3,17 @@
 NetSyncher::NetSyncher() {
 }
 
-void NetSyncher::onStartRecording()
+void NetSyncher::StartRecording()
 {
 	if (this->client != nullptr) {
-		this->client->startRecording();
+		this->client->onStartRecording();
 	}
 }
 
-void NetSyncher::onStopRecording()
+void NetSyncher::StopRecording()
 {
 	if (this->client != nullptr) {
-		this->client->stopRecording();
+		this->client->onStopRecording();
 	}
 }
 
