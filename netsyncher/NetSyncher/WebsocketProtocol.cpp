@@ -185,21 +185,61 @@ std::shared_ptr<WS_MSG> WebsocketProtocol::ReadFrame(uint8_t * buffer, uint32_t 
 }
 
 
-// ----------------------- WebsocketServer ---------------------------
+// ------------------------ IMessageHandler -------------------
 
-
-WebsocketServer::WebsocketServer(IMessageHandler * handler)
-	:handler(handler)
-{
+WebsocketServer::IMessageHandler::IMessageHandler() {
+	this->serverThread = new std::thread(&WebsocketServer::IMessageHandler::HandleLoop, this);
 }
 
-void WebsocketServer::Send(uint8_t * buffer, uint32_t len)
+WebsocketServer::IMessageHandler::~IMessageHandler() {
+	this->Close();
+	if (this->serverThread->joinable()) {
+		this->serverThread->join();
+	}
+}
+
+
+void WebsocketServer::IMessageHandler::HandleLoop()
+{
+	while (this->alive) {
+		Buffer in(2048);
+		stream->read(in.buffer, in.len);
+
+		auto msg = this->protocol.ReadFrame(in.buffer, in.len);
+		if (msg->opcode == WSOpcode::TextFrame) {
+			this->OnMessage(msg->buffer, msg->length);
+		}
+	}
+}
+
+void WebsocketServer::IMessageHandler::Send(uint8_t * buffer, uint32_t len)
 {
 	if (this->stream != nullptr) {
 		Buffer out(256);
 		uint32_t wsBytes = this->protocol.WriteFrame(WSOpcode::TextFrame, buffer, len, out.buffer, out.len, false);
 		stream->write(out.buffer, wsBytes);
 	}
+}
+
+void WebsocketServer::IMessageHandler::Close()
+{
+	this->alive = false;
+}
+
+void WebsocketServer::IMessageHandler::SetStream(shared_ptr<IOStream> stream)
+{
+	this->stream = stream;
+}
+
+
+
+
+// --------------- WebsocketServer -------------------
+
+
+WebsocketServer::WebsocketServer(IWebsocketApplication* app)
+	:app(app)
+{
 }
 
 shared_ptr<HttpResponseMsg> WebsocketServer::AcceptUpgrade(HttpRequestMsg* req)
@@ -217,24 +257,12 @@ shared_ptr<HttpResponseMsg> WebsocketServer::AcceptUpgrade(HttpRequestMsg* req)
 
 void WebsocketServer::HandleStream(shared_ptr<IOStream> stream)
 {
-	this->stream = stream;
-	this->serverThread = new std::thread(&WebsocketServer::HandleLoop, this, stream);
-
+	auto handler = IMessageHandlerPtr(this->app->CreateHandler());
+	handler->SetStream(stream);
+	/*
 	Buffer b = Buffer::fromString("Hello world");
 	Buffer out(256);
 	uint32_t wsBytes = this->protocol.WriteFrame(WSOpcode::TextFrame, b.buffer, b.len, out.buffer, out.len, false);
 	stream->write(out.buffer, wsBytes);
-}
-
-void WebsocketServer::HandleLoop(shared_ptr<IOStream> stream)
-{
-	while (true) {
-		Buffer in(2048);
-		stream->read(in.buffer, in.len);
-
-		auto msg = this->protocol.ReadFrame(in.buffer, in.len);
-		if (msg->opcode == WSOpcode::TextFrame) {
-			this->handler->OnMessage(msg->buffer, msg->length);
-		}
-	}
+	*/
 }

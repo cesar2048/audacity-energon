@@ -173,6 +173,7 @@
     <ClCompile Include="sha1.c" />
     <ClCompile Include="WebApp.cpp" />
     <ClCompile Include="WebsocketProtocol.cpp" />
+    <ClCompile Include="WxHttpServer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="base64.h" />
@@ -183,6 +184,7 @@
     <ClInclude Include="stringextension.h" />
     <ClInclude Include="WebApp.h" />
     <ClInclude Include="WebsocketProtocol.h" />
+    <ClInclude Include="WxHttpServer.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -71,24 +71,47 @@ private:
 class WebsocketServer : public HttpServer::IUpgradeHandler
 {
 public:
+	/// Interface to accept a websocket message
+	
 	class IMessageHandler {
+		shared_ptr<IOStream> stream;
+		WebsocketProtocol protocol;
+		std::thread* serverThread;
+		bool alive;
+
+		void HandleLoop();
+
 	public:
+		IMessageHandler();
+		~IMessageHandler();
+
 		virtual void OnMessage(uint8_t* buffer, uint32_t len) = 0;
+		void Send(uint8_t* buffer, uint32_t len);
+		void Close();
+
+		/// used internally
+		void SetStream(shared_ptr<IOStream> stream);
 	};
 
-	WebsocketServer(IMessageHandler* handler);
-	void Send(uint8_t* buffer, uint32_t len);
 
+	/// Interface to accept websocket connections
+	class IWebsocketApplication {
+	public:
+		/// Generate a new instance of a handler to assign to an incoming connection
+		virtual shared_ptr<IMessageHandler> CreateHandler() = 0;
+	};
+
+	WebsocketServer(IWebsocketApplication* app);
+	
 	// Heredado vía IUpgradeHandler
 	virtual shared_ptr<HttpResponseMsg> AcceptUpgrade(HttpRequestMsg* msg) override;
 	virtual void HandleStream(shared_ptr<IOStream> stream) override;
 
 private:
-	void HandleLoop(shared_ptr<IOStream> stream);
-
+	
 	WebsocketProtocol protocol;
-	IMessageHandler* handler;
-
-	std::thread* serverThread;
-	shared_ptr<IOStream> stream;
+	IWebsocketApplication* app;
 };
+
+typedef shared_ptr<WebsocketServer::IMessageHandler> IMessageHandlerPtr;
+

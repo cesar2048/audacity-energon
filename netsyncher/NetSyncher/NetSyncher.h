@@ -3,14 +3,15 @@
 #ifndef WX_PRECOMP
 	#include <wx/wx.h>
 #endif
+
 #include <memory>
+#include <map>
 
 using namespace std;
 
 /// High level net synchronizer application
-class NetSyncher
-{
-public:
+namespace NetSynch {
+
 	class IClientDevice
 	{
 	public:
@@ -18,11 +19,19 @@ public:
 		virtual void onStopRecording() = 0;
 	};
 
-	shared_ptr<IClientDevice> client;
+	class NetSyncher
+	{
+		std::map<int, shared_ptr<IClientDevice>> clients;
+		int id;
 
-	NetSyncher();
-	void StartRecording();
-	void StopRecording();
-	bool acceptClient(shared_ptr<IClientDevice> client);
-};
+	public:
+
+		NetSyncher();
+		void StartRecording();
+		void StopRecording();
+
+		bool acceptClient(shared_ptr<IClientDevice> client);
+	};
+
+}
 

@@ -5,10 +5,10 @@
 
 #include "NetSyncher.h"
 #include "WebApp.h"
+#include "WxHttpServer.h"
 
 
 // ------------ MyApp ---------------------
-
 
 class MyApp : public wxApp {
 	public:
@@ -27,11 +27,11 @@ class MyFrame : public wxFrame {
 	public:
 		MyFrame(const wxString& title, const wxPoint& pos, const wxSize& size);
 	private:
+		NetSynch::NetSyncher* ns;
+		WebApp* app;
+
 		HttpServer* server;
 		WebsocketServer* wsServer;
-
-		WebApp app;
-		NetSyncher ns;
 
 		wxButton *btnRecord;
 		bool isRecording;
@@ -62,8 +62,12 @@ bool MyApp::OnInit() {
 }
 
 MyFrame::MyFrame(const wxString& title, const wxPoint& pos, const wxSize& size)
-	: wxFrame(NULL, wxID_ANY, title, pos, size)
+	: wxFrame(NULL, wxID_ANY, title, pos, size),
+	wsServer(NULL),
+	server(NULL)
 {
+	this->ns = new NetSynch::NetSyncher();
+	this->app = new WebApp(this->ns);
 	this->isRecording = false;
 
 	{ // menu block
@@ -95,7 +99,8 @@ MyFrame::MyFrame(const wxString& title, const wxPoint& pos, const wxSize& size)
 
 void MyFrame::OnExit(wxCommandEvent& event) {
 	Close(true);
-
+	delete this->app;
+	delete this->ns;
 }
 
 void MyFrame::OnAbout(wxCommandEvent& event) {
@@ -105,33 +110,26 @@ void MyFrame::OnAbout(wxCommandEvent& event) {
 
 void MyFrame::OnRecord(wxCommandEvent & event)
 {
-	
 	if (!this->isRecording) {
-		this->ns.StartRecording();
+		this->ns->StartRecording();
 		this->btnRecord->SetLabel("Stop");
-		Buffer b = Buffer::fromString("Start recording");
-		this->wsServer->Send(b.buffer, b.len);
 	} else {
+		this->ns->StopRecording();
 		this->btnRecord->SetLabel("Record");
-		Buffer b = Buffer::fromString("Stop recording");
-		this->wsServer->Send(b.buffer, b.len);
 	}
 	this->isRecording = !this->isRecording;
-	
-	
-
-	
-	wxLogMessage("Start recording");
 }
 
 void MyFrame::OnStartServer(wxCommandEvent& event) {
-	this->wsServer = new WebsocketServer(&this->app);
+	if (!this->wsServer) {
+		this->wsServer = new WebsocketServer(this->app);
 
-	this->server = AllocateWebServer();
-	this->server->SetRouteHandler(&this->app);
-	this->server->RegisterUpdateHandler("websocket", this->wsServer);
-	this->server->Listen(8080);
+		this->server = AllocateWebServer();
+		this->server->SetRouteHandler(this->app);
+		this->server->RegisterUpdateHandler("websocket", this->wsServer);
+		this->server->Listen(8080);
 
-	wxLogMessage("Server started!");
+		wxLogMessage("Server started!");
+	}
 };
 

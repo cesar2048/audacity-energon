@@ -1,25 +1,35 @@
 #include "NetSyncher.h"
 
-NetSyncher::NetSyncher() {
+using namespace NetSynch;
+
+NetSyncher::NetSyncher() :id(0) 
+{	
 }
 
 void NetSyncher::StartRecording()
 {
-	if (this->client != nullptr) {
-		this->client->onStartRecording();
+	auto ptr = clients.begin();
+	auto end = clients.end();
+	for (; ptr != end; ptr++) {
+		ptr->second->onStartRecording();
 	}
 }
 
 void NetSyncher::StopRecording()
 {
-	if (this->client != nullptr) {
-		this->client->onStopRecording();
+	auto ptr = clients.begin();
+	auto end = clients.end();
+	for (; ptr != end; ptr++) {
+		ptr->second->onStopRecording();
 	}
 }
 
 bool NetSyncher::acceptClient(shared_ptr<IClientDevice> client)
 {
-	this->client = client;
-	return true;
+	if (client != nullptr) {
+		clients[this->id++] = client;
+		return true;
+	}
+	return false;
 }
 

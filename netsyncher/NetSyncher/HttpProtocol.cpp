@@ -29,10 +29,12 @@ void HttpServer::Listen(int port) {
 	// how to create a new thread
 	// https://stackoverflow.com/a/10673671
 
-	// TODO: handle unable to bind error
-	this->isServerThreadAlive = true;
-	this->network->Listen(port);
-	this->serverThread = new std::thread(&HttpServer::HandleLoop, this/*, additional args */);
+	if (!this->isServerThreadAlive) {
+		this->isServerThreadAlive = true;
+		// TODO: handle unable to bind error
+		this->network->Listen(port);
+		this->serverThread = new std::thread(&HttpServer::HandleLoop, this/*, additional args */);
+	}
 }
 
 
