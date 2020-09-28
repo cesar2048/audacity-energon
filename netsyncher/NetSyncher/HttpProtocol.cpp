@@ -39,12 +39,6 @@ void HttpServer::Listen(int port) {
 
 
 void HttpServer::HandleLoop(/* additional args */) {
-	// how to print to VisualStudio debug console 
-	// https://stackoverflow.com/questions/1333527/how-do-i-print-to-the-debug-output-window-in-a-win32-server
-
-	// slow connection to localhost
-	// https://github.com/golang/go/issues/23366#issuecomment-374397983
-
 	long elapsed = 0;
 
 	while (this->isServerThreadAlive) {
@@ -107,24 +101,6 @@ HttpProtocol::HttpProtocol(IOStream *iostream) :iostream(iostream) {
 
 HttpRequestMsg HttpProtocol::readRequest()
 {
-	/*
-	Pass the argument by reference
-	https://stackoverflow.com/a/14548993
-
-	Basic IO
-	https://stackoverflow.com/questions/17290144/stdio-vs-iostream
-	http://www.cplusplus.com/doc/tutorial/basic_io/
-	 
-	output stream in c++
-	https://www.cprogramming.com/tutorial/c++-iostreams.html
-	https://stackoverflow.com/questions/13703823/a-custom-ostream
-	
-	input streams in c++
-	https://stackoverflow.com/questions/14086417/how-to-write-custom-input-stream-in-c
-	http://www.cplusplus.com/reference/sstream/stringbuf/
-	https://stackoverflow.com/questions/772355/how-to-inherit-from-stdostream
-	*/
-
 	string text = readHeadersBlock(this->iostream);
 
 	std::vector<string> lines = split(text, '\n');

@@ -138,8 +138,6 @@ uint32_t WebsocketProtocol::WriteFrame(WSOpcode opcode, uint8_t* inBuffer, uint3
 
 std::shared_ptr<WS_MSG> WebsocketProtocol::ReadFrame(uint8_t * buffer, uint32_t bufferLength)
 {
-	// https://stackoverflow.com/questions/22220512/check-for-null-in-stdshared-ptr
-
 	std::shared_ptr<WS_MSG> frame = std::make_shared<WS_MSG>();
 	// frame->buffer = std::shared_ptr<uint8_t*>(new uint8_t[20], std::default_delete<uint8_t[]>() );
 	// https://stackoverflow.com/questions/13061979/shared-ptr-to-an-array-should-it-be-used
