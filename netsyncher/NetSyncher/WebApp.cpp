@@ -1,26 +1,20 @@
 #include "WebApp.h"
 #include "NetSyncher.h"
 
-class ClientObject : public NetSynch::IClientDevice, public WebsocketServer::IMessageHandler {
+class ClientObject : public NetSynch::IClientDevice {
 
-	// Heredado vía IMessageHandler
-	virtual void OnMessage(uint8_t * buffer, uint32_t len) override
-	{
-		string str = string((char*)buffer, len);
-		DebugLog("WS> %s\n", str.c_str());
-	}
 
 	// Heredado vía IClientDevice
 	virtual void onStartRecording() override
 	{
-		Buffer msg = Buffer::fromString("Start recording");
-		Send(msg.buffer, msg.len);
+		// Buffer msg = Buffer::fromString("Start recording");
+		// Send(msg.buffer, msg.len);
 	}
 
 	virtual void onStopRecording() override
 	{
-		Buffer msg = Buffer::fromString("Stop recording");
-		Send(msg.buffer, msg.len);
+		// Buffer msg = Buffer::fromString("Stop recording");
+		// Send(msg.buffer, msg.len);
 	}
 };
 
@@ -30,6 +24,21 @@ class ClientObject : public NetSynch::IClientDevice, public WebsocketServer::IMe
 WebApp::WebApp(NetSynch::NetSyncher * syncher)
 	:syncher(syncher)
 {
+}
+
+void WebApp::onOpen(WebSocketBase * conn)
+{
+	DebugLog("WS: opened connection\n");
+}
+
+void WebApp::onMessage(WebSocketBase * conn, string message)
+{
+	DebugLog("WS: onmessage: %s\n", message.c_str());
+}
+
+void WebApp::onClose(WebSocketBase * conn)
+{
+	DebugLog("WS: closed connection\n");
 }
 
 shared_ptr<HttpResponseMsg> WebApp::OnRequest(HttpRequestMsg* req)
@@ -65,6 +74,7 @@ shared_ptr<HttpResponseMsg> WebApp::OnRequest(HttpRequestMsg* req)
 	return res;
 }
 
+/*
 shared_ptr<WebsocketServer::IMessageHandler> WebApp::CreateHandler()
 {
 	IMessageHandlerPtr ptr(new ClientObject());
@@ -72,4 +82,4 @@ shared_ptr<WebsocketServer::IMessageHandler> WebApp::CreateHandler()
 	this->syncher->acceptClient(dev);
 	return ptr;
 }
-
+*/

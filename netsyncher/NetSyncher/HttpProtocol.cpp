@@ -196,6 +196,11 @@ void MultipartStream::close()
 	// nothing to do here
 }
 
+bool MultipartStream::isconnected()
+{
+	return this->available != 0;
+}
+
 
 
 // -------------- HttpProtocol imlementation -----------------------------

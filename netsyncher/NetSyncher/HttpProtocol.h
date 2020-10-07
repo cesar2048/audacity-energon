@@ -38,6 +38,9 @@ public:
 
 	/// closes the stream
 	virtual void close() = 0;
+
+	/// returns true if the stream is able to read/write
+	virtual bool isconnected() =0;
 };
 
 
@@ -60,6 +63,7 @@ public:
 	virtual uint32_t read(uint8_t * buffer, uint32_t len) override;
 	virtual uint32_t write(uint8_t * buffer, uint32_t len) override;
 	virtual void close() override;
+	virtual bool isconnected() override;
 };
 
 

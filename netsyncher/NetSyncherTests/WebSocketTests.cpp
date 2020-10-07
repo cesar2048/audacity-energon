@@ -89,7 +89,7 @@ namespace NetSyncherTests
 
 			// build expected frame
 			uint8_t expected[BYTES_HEADER + LEN];
-			expected[0] = 0x82;               // fin + binary opcode
+			expected[0] = 0x82;               // fin + "binary" opcode
 			expected[1] = 0 + 127;            // mask + length(127), cause length needs more than 16 bit
 			expected[2] = LEN & 0xFF;         // length, 8 bits
 			expected[3] = (LEN << 8) & 0xFF;  // length, 8 bits
@@ -109,6 +109,25 @@ namespace NetSyncherTests
 			unsigned int written = ws.WriteFrame(WSOpcode::BinaryFrame, inBuffer, LEN, outBuffer, OUT_LEN, false);
 
 			compareBuffers(expected, BYTES_HEADER + LEN, outBuffer, written);
+		}
+
+		TEST_METHOD(WS_WriteFrame_Close)
+		{
+			static const size_t OUT_LEN = 10; // 2 bytes should be necessary, giving more to allow failures
+			static const size_t BYTES_HEADER = 2;
+
+			// prepare
+			uint8_t expected[2];
+			expected[0] = 0x88;   // fin + "close" opcode
+			expected[1] = 0x0;    // mask + length(0)
+
+			// execute
+			WebsocketProtocol ws;
+			uint8_t outBuffer[OUT_LEN];
+			unsigned int written = ws.WriteFrame(WSOpcode::CloseConnection, NULL, 0, outBuffer, OUT_LEN, false);
+
+			// assert
+			compareBuffers(expected, BYTES_HEADER, outBuffer, written);
 		}
 
 		TEST_METHOD(WS_ReadFrame_LenLessThan125)

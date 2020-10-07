@@ -77,7 +77,7 @@ uint32_t WebsocketProtocol::WriteFrame(WSOpcode opcode, uint8_t* inBuffer, uint3
 	 +---------------------------------------------------------------+
 	*/
 	// verify min buffer length
-	if (outSize < 16) {
+	if (outSize < 2) {
 		return -1;
 	}
 
@@ -183,61 +183,101 @@ std::shared_ptr<WS_MSG> WebsocketProtocol::ReadFrame(uint8_t * buffer, uint32_t 
 }
 
 
-// ------------------------ IMessageHandler -------------------
+// --------------- WebsocketBase -------------------
 
-WebsocketServer::IMessageHandler::IMessageHandler()
-	:stream(nullptr), serverThread(nullptr), alive(true)
+
+
+WebSocketBase::WebSocketBase(shared_ptr<IOStream> stream)
+	: stream(stream)
 {
-	this->serverThread = new std::thread(&WebsocketServer::IMessageHandler::HandleLoop, this);
 }
 
-WebsocketServer::IMessageHandler::~IMessageHandler() {
-	this->Close();
-	if (this->serverThread->joinable()) {
-		this->serverThread->join();
-	}
-}
-
-
-void WebsocketServer::IMessageHandler::HandleLoop()
-{
-	while (this->alive) {
-		Buffer in(2048);
-		stream->read(in.buffer, in.len);
-
-		auto msg = this->protocol.ReadFrame(in.buffer, in.len);
-		if (msg->opcode == WSOpcode::TextFrame) {
-			this->OnMessage(msg->buffer, msg->length);
-		}
-	}
-}
-
-void WebsocketServer::IMessageHandler::Send(uint8_t * buffer, uint32_t len)
+void WebSocketBase::Send(uint8_t * buffer, uint32_t len)
 {
 	if (this->stream != nullptr) {
-		Buffer out(256);
+		Buffer out(len + MAX_HEADER_BYTES); // length + max overhead
 		uint32_t wsBytes = this->protocol.WriteFrame(WSOpcode::TextFrame, buffer, len, out.buffer, out.len, false);
 		stream->write(out.buffer, wsBytes);
 	}
 }
 
-void WebsocketServer::IMessageHandler::Close()
+void WebSocketBase::Send(string & message)
 {
-	this->alive = false;
+	uint8_t* buffer = (uint8_t*) message.c_str();
+	uint32_t len = message.size();
+
+	this->Send(buffer, len);
 }
 
-void WebsocketServer::IMessageHandler::SetStream(shared_ptr<IOStream> stream)
+void WebSocketBase::Close()
 {
-	this->stream = stream;
+	Buffer out(MAX_HEADER_BYTES);
+	uint32_t wsBytes = this->protocol.WriteFrame(WSOpcode::CloseConnection, NULL, 0, out.buffer, out.len, false);
+	stream->write(out.buffer, wsBytes);
 }
 
 
+// --------------- WebsocketImpl -------------------
+
+class WebSocketImpl : public WebSocketBase {
+	IWebsocketApp* app;
+	std::thread* wsThread;
+	bool alive;
+
+public:
+
+	WebSocketImpl(shared_ptr<IOStream> stream, IWebsocketApp* app)
+		: WebSocketBase(stream), app(app), alive(false)
+	{
+	}
+
+	~WebSocketImpl()
+	{
+		this->alive = false;
+		if (this->wsThread != NULL && this->wsThread->joinable()) {
+			this->wsThread->join();
+			this->wsThread = false;
+		}
+	}
+
+	void StartServerThread() {
+		this->alive = true;
+		this->wsThread = new std::thread(&WebSocketImpl::HandleLoop, this);
+	}
+
+private:
+
+	void HandleLoop() {
+		this->app->onOpen(this);
+
+		while (this->alive) {
+			Buffer in(2048); // TODO: allow reading of frames bigger than this
+			uint32_t bytesRead = stream->read(in.buffer, in.len);
+			if (bytesRead == 0 && !stream->isconnected())
+			{
+				this->alive = false;
+			}
+			else
+			{
+				auto msg = this->protocol.ReadFrame(in.buffer, in.len);
+
+				if (msg->opcode == WSOpcode::TextFrame) {
+					string text((char*) msg->buffer, msg->length);
+					this->app->onMessage(this, text);
+
+				} else if (msg->opcode == WSOpcode::CloseConnection) {
+					this->app->onClose(this);
+				}
+			}
+		}
+	}
+};
 
 
 // --------------- WebsocketServer -------------------
 
 
-WebsocketServer::WebsocketServer(IWebsocketApplication* app)
+WebsocketServer::WebsocketServer(IWebsocketApp* app)
 	:app(app)
 {
 }
@@ -257,12 +297,8 @@ shared_ptr<HttpResponseMsg> WebsocketServer::AcceptUpgrade(HttpRequestMsg* req)
 
 void WebsocketServer::HandleStream(shared_ptr<IOStream> stream)
 {
-	auto handler = IMessageHandlerPtr(this->app->CreateHandler());
-	handler->SetStream(stream);
-	/*
-	Buffer b = Buffer::fromString("Hello world");
-	Buffer out(256);
-	uint32_t wsBytes = this->protocol.WriteFrame(WSOpcode::TextFrame, b.buffer, b.len, out.buffer, out.len, false);
-	stream->write(out.buffer, wsBytes);
-	*/
+	// TODO: fix memory leak
+	WebSocketImpl* ws = new WebSocketImpl(stream, this->app);
+	ws->StartServerThread();
 }
+

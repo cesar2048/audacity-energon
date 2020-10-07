@@ -18,6 +18,9 @@ extern "C" {
 // Initial buffer size
 #define WS_INITIAL_BUFFER 2048
 
+// max overhead bytes for a websocket frame
+#define MAX_HEADER_BYTES 20
+
 // GUID defined in RFC6455 for websocket
 const char wsGUID[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -68,40 +71,33 @@ private:
 };
 
 
+class WebSocketBase {
+protected:
+	shared_ptr<IOStream> stream;
+	WebsocketProtocol protocol;
+
+public:
+	WebSocketBase(shared_ptr<IOStream> stream);
+
+	void Send(uint8_t* buffer, uint32_t len);
+	void Send(string& message);
+	void Close();
+};
+
+
+class IWebsocketApp {
+public:
+	virtual void onOpen(WebSocketBase* conn) = 0;
+	virtual void onMessage(WebSocketBase* conn, string message) =0;
+	virtual void onClose(WebSocketBase* conn) = 0;
+};
+
+
 class WebsocketServer : public HttpServer::IUpgradeHandler
 {
 public:
-	/// Interface to accept a websocket message
-	
-	class IMessageHandler {
-		shared_ptr<IOStream> stream;
-		WebsocketProtocol protocol;
-		std::thread* serverThread;
-		bool alive;
 
-		void HandleLoop();
-
-	public:
-		IMessageHandler();
-		~IMessageHandler();
-
-		virtual void OnMessage(uint8_t* buffer, uint32_t len) = 0;
-		void Send(uint8_t* buffer, uint32_t len);
-		void Close();
-
-		/// used internally
-		void SetStream(shared_ptr<IOStream> stream);
-	};
-
-
-	/// Interface to accept websocket connections
-	class IWebsocketApplication {
-	public:
-		/// Generate a new instance of a handler to assign to an incoming connection
-		virtual shared_ptr<IMessageHandler> CreateHandler() = 0;
-	};
-
-	WebsocketServer(IWebsocketApplication* app);
+	WebsocketServer(IWebsocketApp* app);
 	
 	// Heredado vía IUpgradeHandler
 	virtual shared_ptr<HttpResponseMsg> AcceptUpgrade(HttpRequestMsg* msg) override;
@@ -110,8 +106,5 @@ public:
 private:
 	
 	WebsocketProtocol protocol;
-	IWebsocketApplication* app;
+	IWebsocketApp* app;
 };
-
-typedef shared_ptr<WebsocketServer::IMessageHandler> IMessageHandlerPtr;
-

@@ -70,10 +70,16 @@ public:
 		return this->socket.LastWriteCount();
 	}
 
-	// Heredado vía IOStream
+	// Inherited vía IOStream
 	virtual void close() override
 	{
 		/// do nothing here
+	}
+
+	// Inherited vía IOStream
+	virtual bool isconnected() override
+	{
+		return this->socket.IsConnected();
 	}
 };
 

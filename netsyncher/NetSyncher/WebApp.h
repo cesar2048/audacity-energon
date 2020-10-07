@@ -12,15 +12,17 @@
 
 using namespace std; 
 
-class WebApp : public HttpServer::IRouteHandler, public WebsocketServer::IWebsocketApplication
+class WebApp : public HttpServer::IRouteHandler, public IWebsocketApp
 {
 	NetSynch::NetSyncher* syncher;
 	
 	// Heredado vía IRouteHandler
 	virtual shared_ptr<HttpResponseMsg> OnRequest(HttpRequestMsg* req) override;
 
-	// Heredado vía IWebsocketApplication
-	virtual shared_ptr<WebsocketServer::IMessageHandler> CreateHandler() override;
+	// Heredado vía IWebsocketApp
+	virtual void onOpen(WebSocketBase * conn) override;
+	virtual void onMessage(WebSocketBase * conn, string message) override;
+	virtual void onClose(WebSocketBase * conn) override;
 
 public:
 	WebApp(NetSynch::NetSyncher* syncher);
