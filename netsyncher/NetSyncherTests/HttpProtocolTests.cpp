@@ -13,17 +13,15 @@ namespace NetSyncherTests
 
 	TEST_CLASS(HttpProtocolTests)
 	{
-		void runTestAsserts(HttpRequestMsg req) {
+		void runTestAsserts(HttpRequestMsg* req) {
 			// assert
-			map<string, string>::iterator it;
+			auto acceptHeader = req->getHeader("accept");
+			Assert::IsFalse(acceptHeader == nullptr, L"\"Accept\" header not found");
+			Assert::AreEqual(*acceptHeader, string("application/json"));
 
-			it = req.headers.find("accept");
-			Assert::IsFalse(it == req.headers.end(), L"\"Accept\" header not found");
-			Assert::AreEqual(it->second, string("application/json"));
-
-			it = req.headers.find("host");
-			Assert::IsFalse(it == req.headers.end(), L"\"Accept\" header not found");
-			Assert::AreEqual(it->second, string("www.w3.org"));
+			auto hostHeader = req->getHeader("host");
+			Assert::IsFalse(hostHeader == nullptr, L"\"host\" header not found");
+			Assert::AreEqual(*hostHeader, string("www.w3.org"));
 		}
 
 	public:
@@ -39,10 +37,10 @@ namespace NetSyncherTests
 			// execute
 			StrInputStream iss(sampleGetReq);
 			HttpProtocol http = HttpProtocol(&iss);
-			HttpRequestMsg req = http.readRequest();
+			HttpReqPtr req = http.readRequest();
 
 			// assert
-			this->runTestAsserts(req);
+			this->runTestAsserts(req.get());
 		}
 
 		TEST_METHOD(Test_ReqWithInitialSapces)
@@ -60,10 +58,11 @@ namespace NetSyncherTests
 			// execute
 			StrInputStream iss(sampleGetToTestWellBehavedServers);
 			HttpProtocol http = HttpProtocol(&iss);
-			HttpRequestMsg req = http.readRequest();
+			
+			HttpReqPtr req = http.readRequest();
 
 			// assert
-			this->runTestAsserts(req);
+			this->runTestAsserts(req.get());
 		}
 
 		int generateResponse(char *buffer, int32_t bufferLength, const char *body) {
@@ -86,10 +85,10 @@ namespace NetSyncherTests
 
 			// execute
 			HttpProtocol http = HttpProtocol(&iss);
-			HttpResponseMsg res;
-			res.setHeader("Content-Type", "application/json");
-			res.write("{\"Hello\":\"world\"}");
-			http.sendResponse(res);
+			HttpResPtr res = HttpServer::createResponse();
+			res->setHeader("Content-Type", "application/json");
+			res->write("{\"Hello\":\"world\"}");
+			http.sendResponse(res.get());
 
 			uint32_t outLen;
 			uint8_t* outBuffer = iss.outBuffer._getBuffer(&outLen);
@@ -106,14 +105,14 @@ namespace NetSyncherTests
 			HttpProtocol http = HttpProtocol(&tr);
 			
 			// execute 1
-			HttpRequestMsg req = http.readRequest();
+			HttpReqPtr req = http.readRequest();
 
 			// assert 1
 			int position = tr.position();
 			Assert::AreEqual(headerBytes, position);
 
 			// execute 2
-			shared_ptr<MultipartStream> file = req.readFile("theFile");
+			shared_ptr<MultipartStream> file = req->readFile("theFile");
 
 			// assert 2
 			Assert::IsTrue(file != nullptr);
@@ -139,10 +138,10 @@ namespace NetSyncherTests
 			// execute
 			StrInputStream iss(sampleGetReq);
 			HttpProtocol http = HttpProtocol(&iss);
-			HttpRequestMsg req = http.readRequest();
+			HttpReqPtr req = http.readRequest();
 
 			// assert
-			shared_ptr<MultipartStream> file = req.readFile("theFile");
+			shared_ptr<MultipartStream> file = req->readFile("theFile");
 			Assert::IsTrue(file == nullptr);
 			Assert::AreEqual(iss.numberOfReads, 1, L"Should not have attempted to read again for mime headers");
 		}

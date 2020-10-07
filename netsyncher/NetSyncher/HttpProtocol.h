@@ -66,58 +66,53 @@ public:
 /// A request message as parsed by HttpProtocol
 class HttpRequestMsg
 {
-	IOStream* stream;
-	string multipartBoundary;
-	map<string, string> readMimePartHeaders();
-
 public:
-	HttpRequestMsg(IOStream *stream);
+	/// returns a header, or nullptr if the header is not found
+	virtual shared_ptr<string> getHeader(string key) =0;
 
-	map<string, string> headers;
-	string uri;
-	string method;
-
-	void setMultipartBoundary(string boundary);
-	shared_ptr<string> getHeader(string key);
-
-	shared_ptr<MultipartStream> readFile(const char* name);
+	/// returns a MultipartStream, or null if there is no files to read
+	virtual shared_ptr<MultipartStream> readFile(const char* name) =0;
 };
+
+typedef shared_ptr<HttpRequestMsg> HttpReqPtr;
 
 
 /// Http response message
 class HttpResponseMsg : public MemBuffer
 {
 public:
-	map<string, string> headers;
-	int statusCode = 200;
 
-	void setHeader(const char* key, const char* value);
+	/// sets an output header
+	virtual void setHeader(const char* key, const char* value) =0;
+
+	/// returns a copy of the headers
+	virtual map<string, string> getHeaders() =0;
+
+	virtual void setStatus(int status) = 0;
+	virtual int getStatus() = 0;
 };
 
-/**
-The main class responsible for interacting with application code
-This implementation does not support transfer encoding chunked,
-requiring to have the entire response in memory before sending it back to the client.
-*/
+typedef shared_ptr<HttpResponseMsg> HttpResPtr;
+
+
+/// This is the main class that implements the http protocol
+/// This implementation does not support transfer encoding chunked,
+/// requiring to have the entire response in memory before sending it back to the client.
 class HttpProtocol
 {
 	IOStream *iostream;
 
 public:
+	/// constructor
+	HttpProtocol(IOStream *iostream);
 
-	HttpProtocol(IOStream *iStream);
+	/// Reads an object representing the request
+	HttpReqPtr readRequest();
 
-	/*
-	Reads an object representing the request
-	*/
-	HttpRequestMsg readRequest();
-
-	/*
-	Writes the response object
-	*/
-	void sendResponse(HttpResponseMsg &msg);
-
+	/// Writes the response object
+	void sendResponse(HttpResponseMsg* msg);
 };
+
 
 class HttpServer
 {
@@ -143,13 +138,14 @@ public:
 			virtual shared_ptr<HttpResponseMsg> OnRequest(HttpRequestMsg* req) = 0;
 	};
 
-	
 	~HttpServer();
 	void SetHandlers(INetwork* network);
 	void SetRouteHandler(IRouteHandler* handler);
 	void Listen(int port);
 	void RegisterUpdateHandler(const string& key, IUpgradeHandler* handler);
 	IUpgradeHandler* getUpdateHandler(shared_ptr<string> key);
+
+	static shared_ptr<HttpResponseMsg> createResponse();
 
 private:
 	void HandleLoop();
@@ -166,8 +162,6 @@ private:
 // --------------------------------------------
 //                  functions
 // --------------------------------------------
-// shared_ptr<string> getMapValue(const map<string, string>& headers, string key);
-// shared_ptr<int> getHeaderAsInt(const map<string, string>& headers, string key);
 
 
 /// Log timestamped messages to VisualStudio debug log

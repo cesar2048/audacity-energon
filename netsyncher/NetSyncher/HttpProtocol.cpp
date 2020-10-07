@@ -6,117 +6,84 @@
 
 #include "stringextension.h"
 
-// ------------- IHttpServer ---------------------
+
+// -------------- IOStream -------------------------
 
 
-HttpServer::~HttpServer() {
-	if (this->serverThread) {
-		this->isServerThreadAlive = true;
-		this->serverThread->join();
-		delete this->serverThread;
-	}
-}
-
-void HttpServer::SetHandlers(INetwork * network) {
-	this->network = network;
-}
-
-void HttpServer::SetRouteHandler(IRouteHandler * handler) {
-	this->handler = handler;
-}
-
-void HttpServer::Listen(int port) {
-	// how to create a new thread
-	// https://stackoverflow.com/a/10673671
-
-	if (!this->isServerThreadAlive) {
-		this->isServerThreadAlive = true;
-		// TODO: handle unable to bind error
-		this->network->Listen(port);
-		this->serverThread = new std::thread(&HttpServer::HandleLoop, this/*, additional args */);
-	}
-}
-
-
-void HttpServer::HandleLoop(/* additional args */) {
-	long elapsed = 0;
-
-	while (this->isServerThreadAlive) {
-		auto stream = this->network->Accept();
-
-		DebugLog("Connection accepted\n");
-		std::chrono::system_clock::time_point ini = std::chrono::system_clock::now();
-
-		HttpProtocol http(stream.get());
-		HttpRequestMsg req = http.readRequest();
-
-		// check for upgrade
-		auto upgrade = req.getHeader("upgrade");
-		auto handler = this->getUpdateHandler(upgrade);
-		if (handler != nullptr) {
-			auto res = handler->AcceptUpgrade(&req);
-			http.sendResponse(*res);
-
-			// delegate connection to the handler
-			handler->HandleStream(stream);
-		} else {
-			auto res = this->handler->OnRequest(&req);
-			http.sendResponse(*res);
-			stream->close();
-
-			std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
-			elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - ini).count();
-		}
-	}
-}
-
-
-void HttpServer::RegisterUpdateHandler(const string& key, IUpgradeHandler* handler)
+uint32_t IOStream::write(const char * string)
 {
-	if (handler != nullptr) {
-		this->upgradeHandlers[key] = handler;
-	}
+	uint32_t len = strlen(string);
+	uint32_t res = this->write((uint8_t*)string, len);
+	return res;
 }
 
-HttpServer::IUpgradeHandler* HttpServer::getUpdateHandler(shared_ptr<string> key)
+
+// -------------- HttpResponseMsg implementation ----------------------------
+
+class HttpResponseMsgImpl : public HttpResponseMsg
 {
-	if (key != nullptr) {
-		auto handler = this->upgradeHandlers.find(*key);
-		if (handler != this->upgradeHandlers.end()) {
-			return handler->second;
-		}
-	}
+	map<string, string> headers;
+	int statusCode = 200;
+public:
+	void setHeader(const char* key, const char* value);
+	map<string, string> getHeaders();
+	void setStatus(int status);
+	int getStatus();
+};
 
-	return nullptr;
-}
-
-
-
-// -------------- HttpProtocol -----------------------------
-
-
-HttpProtocol::HttpProtocol(IOStream *iostream) :iostream(iostream) {
-}
-
-
-HttpRequestMsg HttpProtocol::readRequest()
+void HttpResponseMsgImpl::setHeader(const char* key, const char* value)
 {
-	string text = readHeadersBlock(this->iostream);
+	this->headers[key] = value;
+}
 
-	std::vector<string> lines = split(text, '\n');
-	std::vector<string> parts = split(lines[0], ' ');
+map<string, string> HttpResponseMsgImpl::getHeaders()
+{
+	return map<string, string>(this->headers);
+}
 
-	// more than 3 parts is protocolo error, we don't care
-	HttpRequestMsg msg = HttpRequestMsg(this->iostream);
-	if (parts.size() >= 3) {
-		msg.method = parts[0];
-		msg.uri = parts[1];
-	}
+void HttpResponseMsgImpl::setStatus(int status) {
+	this->statusCode = status;
+}
 
-	parseHeadersIntoMap(lines, msg.headers);
+int HttpResponseMsgImpl::getStatus() {
+	return this->statusCode;
+}
 
-	// check for multipart
-	auto contentType = getMapValue(msg.headers, "content-type");
+
+// -------------- HttpRequestMsg implementation -----------------------------
+
+
+class HttpRequestMsgImpl : public HttpRequestMsg
+{
+	IOStream* stream;
+	string multipartBoundary;
+	map<string, string> readMimePartHeaders();
+	map<string, string> headers;
+	string uri;
+	string method;
+
+public:
+	HttpRequestMsgImpl(IOStream *stream);
+
+	/// returns a header, or nullptr if the header is not found
+	shared_ptr<string> getHeader(string key);
+
+	/// returns a MultipartStream, or null if there is no files to read
+	shared_ptr<MultipartStream> readFile(const char* name);
+
+	void setHeaders(const map<string, string>& headers);
+
+	void setMethod(const string& method);
+
+	void setUri(const string& uri);
+};
+
+void HttpRequestMsgImpl::setHeaders(const map<string, string>& headers)
+{
+	this->headers = headers;
+
+	// check for multipart presence
+	auto contentType = getMapValue(headers, "content-type");
 	if (contentType != nullptr) {
 		auto attributes = getAttributeMap(*contentType);
 		auto value = getMapValue(attributes, "value");
@@ -124,71 +91,33 @@ HttpRequestMsg HttpProtocol::readRequest()
 		if (value && *value == "multipart/form-data") {
 			auto boundary = getMapValue(attributes, "boundary");
 			if (boundary) {
-				msg.setMultipartBoundary(*boundary);
+				this->multipartBoundary = *boundary;
 			}
 		}
 	}
-	
-	return msg;
 }
 
-void HttpProtocol::sendResponse(HttpResponseMsg& msg)
-{
-	char temporaryLine[BUFFER_LEN];
-	uint32_t contentLength = msg.size();
-	uint8_t* contentBuffer = msg.getBuffer();
-
-	// preparation
-	sprintf_s(temporaryLine, BUFFER_LEN, "%d", contentLength);
-	msg.headers["Content-Length"] = string(temporaryLine);
-
-	// status line
-	sprintf_s(temporaryLine, BUFFER_LEN, "HTTP/1.1 %d %s\r\n", msg.statusCode, "OK");
-	this->iostream->write(temporaryLine);
-
-	// headers
-	map<string,string>::iterator it;
-	for (it = msg.headers.begin(); it != msg.headers.end(); it++) {
-		const char* key = (*it).first.c_str();
-		const char* val = (*it).second.c_str();
-		sprintf_s(temporaryLine, BUFFER_LEN, "%s: %s\r\n", key, val);
-		this->iostream->write((uint8_t*)temporaryLine, strlen(temporaryLine));
-	}
-
-	// content
-	this->iostream->write("\r\n");
-	this->iostream->write(contentBuffer, contentLength);
-}
-
-
-// -------------- HttpResponseMsg -----------------------------
-
-
-void HttpResponseMsg::setHeader(const char* key, const char* value)
-{
-	this->headers[key] = value;
-}
-
-
-// -------------- HttpRequestMsg -----------------------------
-
-
-HttpRequestMsg::HttpRequestMsg(IOStream * stream)
+HttpRequestMsgImpl::HttpRequestMsgImpl(IOStream * stream)
 	: stream(stream)
 {
 }
 
-void HttpRequestMsg::setMultipartBoundary(string boundary)
+void HttpRequestMsgImpl::setMethod(const string& method)
 {
-	this->multipartBoundary = boundary;
+	this->method = method;
 }
 
-shared_ptr<string> HttpRequestMsg::getHeader(string key)
+void HttpRequestMsgImpl::setUri(const string& uri)
+{
+	this->uri = uri;
+}
+
+shared_ptr<string> HttpRequestMsgImpl::getHeader(string key)
 {
 	return getMapValue(this->headers, key);
 }
 
-map<string, string> HttpRequestMsg::readMimePartHeaders()
+map<string, string> HttpRequestMsgImpl::readMimePartHeaders()
 {
 	string mimeHeadersText = readHeadersBlock(this->stream);
 	std::vector<string> lines = split(mimeHeadersText, '\n');
@@ -197,7 +126,7 @@ map<string, string> HttpRequestMsg::readMimePartHeaders()
 	return mimeHeaders;
 }
 
-shared_ptr<MultipartStream> HttpRequestMsg::readFile(const char * name)
+shared_ptr<MultipartStream> HttpRequestMsgImpl::readFile(const char * name)
 {
 	bool isFile = false;
 
@@ -215,7 +144,6 @@ shared_ptr<MultipartStream> HttpRequestMsg::readFile(const char * name)
 
 	return nullptr;
 }
-
 
 // ----------------------- MultipartStream -----------------------
 
@@ -269,14 +197,157 @@ void MultipartStream::close()
 }
 
 
-// -------------- IOStream -------------------------
+
+// -------------- HttpProtocol imlementation -----------------------------
 
 
-uint32_t IOStream::write(const char * string)
+HttpProtocol::HttpProtocol(IOStream *iostream)
+	:iostream(iostream)
 {
-	uint32_t len = strlen(string);
-	uint32_t res = this->write((uint8_t*)string, len);
-	return res;
+}
+
+shared_ptr<HttpRequestMsg> HttpProtocol::readRequest()
+{
+	string text = readHeadersBlock(this->iostream);
+
+	std::vector<string> lines = split(text, '\n');
+	std::vector<string> parts = split(lines[0], ' ');
+
+	// more than 3 parts is protocolo error, we don't care
+	shared_ptr<HttpRequestMsgImpl> msg(new HttpRequestMsgImpl(this->iostream));
+	if (parts.size() >= 3) {
+		msg->setMethod(parts[0]);
+		msg->setUri(parts[1]);
+	}
+
+	map<string, string> headers;
+	parseHeadersIntoMap(lines, headers);
+
+	msg->setHeaders(headers);
+	return static_pointer_cast<HttpRequestMsg>(msg);
+}
+
+void HttpProtocol::sendResponse(HttpResponseMsg* msg)
+{
+	char temporaryLine[BUFFER_LEN];
+	uint32_t contentLength = msg->size();
+	uint8_t* contentBuffer = msg->getBuffer();
+
+	// preparation
+	sprintf_s(temporaryLine, BUFFER_LEN, "%d", contentLength);
+	auto headers = msg->getHeaders();
+	headers["Content-Length"] = string(temporaryLine);
+
+	// status line
+	sprintf_s(temporaryLine, BUFFER_LEN, "HTTP/1.1 %d %s\r\n", msg->getStatus(), "OK");
+	this->iostream->write(temporaryLine);
+
+	// headers
+	map<string, string>::iterator it;
+	for (it = headers.begin(); it != headers.end(); it++) {
+		const char* key = (*it).first.c_str();
+		const char* val = (*it).second.c_str();
+		sprintf_s(temporaryLine, BUFFER_LEN, "%s: %s\r\n", key, val);
+		this->iostream->write((uint8_t*)temporaryLine, strlen(temporaryLine));
+	}
+
+	// content
+	this->iostream->write("\r\n");
+	this->iostream->write(contentBuffer, contentLength);
+}
+
+
+
+
+// ------------- HttpServer ---------------------
+
+
+HttpServer::~HttpServer() {
+	if (this->serverThread) {
+		this->isServerThreadAlive = true;
+		this->serverThread->join();
+		delete this->serverThread;
+	}
+}
+
+void HttpServer::SetHandlers(INetwork * network) {
+	this->network = network;
+}
+
+void HttpServer::SetRouteHandler(IRouteHandler * handler) {
+	this->handler = handler;
+}
+
+void HttpServer::Listen(int port) {
+	// how to create a new thread
+	// https://stackoverflow.com/a/10673671
+
+	if (!this->isServerThreadAlive) {
+		this->isServerThreadAlive = true;
+		// TODO: handle unable to bind error
+		this->network->Listen(port);
+		this->serverThread = new std::thread(&HttpServer::HandleLoop, this/*, additional args */);
+	}
+}
+
+
+void HttpServer::HandleLoop(/* additional args */) {
+	long elapsed = 0;
+
+	while (this->isServerThreadAlive) {
+		auto stream = this->network->Accept();
+
+		DebugLog("Connection accepted\n");
+		std::chrono::system_clock::time_point ini = std::chrono::system_clock::now();
+
+		HttpProtocol http(stream.get());
+		shared_ptr<HttpRequestMsg> req = http.readRequest();
+
+		// check for upgrade
+		auto upgrade = req->getHeader("upgrade");
+		auto handler = this->getUpdateHandler(upgrade);
+		if (handler != nullptr) {
+			auto res = handler->AcceptUpgrade(req.get());
+			http.sendResponse(res.get());
+
+			// delegate connection to the handler
+			handler->HandleStream(stream);
+		}
+		else {
+			auto res = this->handler->OnRequest(req.get());
+			http.sendResponse(res.get());
+			stream->close();
+
+			std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
+			elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - ini).count();
+		}
+	}
+}
+
+
+void HttpServer::RegisterUpdateHandler(const string& key, IUpgradeHandler* handler)
+{
+	if (handler != nullptr) {
+		this->upgradeHandlers[key] = handler;
+	}
+}
+
+HttpServer::IUpgradeHandler* HttpServer::getUpdateHandler(shared_ptr<string> key)
+{
+	if (key != nullptr) {
+		auto handler = this->upgradeHandlers.find(*key);
+		if (handler != this->upgradeHandlers.end()) {
+			return handler->second;
+		}
+	}
+
+	return nullptr;
+}
+
+shared_ptr<HttpResponseMsg> HttpServer::createResponse()
+{
+	shared_ptr<HttpResponseMsgImpl> msg(new HttpResponseMsgImpl());
+	return static_pointer_cast<HttpResponseMsg>(msg);
 }
 
 

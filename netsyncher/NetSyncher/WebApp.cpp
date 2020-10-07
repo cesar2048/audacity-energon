@@ -55,14 +55,14 @@ shared_ptr<HttpResponseMsg> WebApp::OnRequest(HttpRequestMsg* req)
 		fclose(f);
 	}
 
-	HttpResponseMsg* res = new HttpResponseMsg();
+	auto res = HttpServer::createResponse();
 	res->setHeader("Content-Type", "application/json");
 	sprintf_s(tempLine, 2048, "{\n\"Hello\":\"world\",\n"
 		"\"Received\":%d,\n"
-		"\"Expected\":%d\n}", totalRead, totalExpected);
+		"\"Expe||2cted\":%d\n}", totalRead, totalExpected);
 	res->write(tempLine);
 
-	return shared_ptr<HttpResponseMsg>(res);
+	return res;
 }
 
 shared_ptr<WebsocketServer::IMessageHandler> WebApp::CreateHandler()
