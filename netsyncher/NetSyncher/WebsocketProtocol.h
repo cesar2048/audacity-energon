@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <memory>
+
 #include "HttpProtocol.h"
 
 /**
@@ -70,7 +71,8 @@ private:
 	size_t bufferLength;
 };
 
-
+/// websocket connection object, instances of this class are received by client application
+/// when implementing the IWebsocketApp interface
 class WebSocketBase {
 protected:
 	shared_ptr<IOStream> stream;
@@ -84,7 +86,9 @@ public:
 	void Close();
 };
 
+typedef shared_ptr<WebSocketBase> WebSocketPtr;
 
+/// Interface for client code to handle websocket connection events
 class IWebsocketApp {
 public:
 	virtual void onOpen(WebSocketBase* conn) = 0;
@@ -96,15 +100,7 @@ public:
 class WebsocketServer : public HttpServer::IUpgradeHandler
 {
 public:
-
-	WebsocketServer(IWebsocketApp* app);
-	
-	// Heredado vía IUpgradeHandler
-	virtual shared_ptr<HttpResponseMsg> AcceptUpgrade(HttpRequestMsg* msg) override;
-	virtual void HandleStream(shared_ptr<IOStream> stream) override;
-
-private:
-	
-	WebsocketProtocol protocol;
-	IWebsocketApp* app;
+	static shared_ptr<WebsocketServer> CreateWebsocketserver(IWebsocketApp* app);
 };
+
+

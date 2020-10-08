@@ -31,7 +31,7 @@ class MyFrame : public wxFrame {
 		WebApp* app;
 
 		HttpServer* server;
-		WebsocketServer* wsServer;
+		shared_ptr<WebsocketServer> wsServer;
 
 		wxButton *btnRecord;
 		bool isRecording;
@@ -122,11 +122,11 @@ void MyFrame::OnRecord(wxCommandEvent & event)
 
 void MyFrame::OnStartServer(wxCommandEvent& event) {
 	if (!this->wsServer) {
-		this->wsServer = new WebsocketServer(this->app);
+		this->wsServer = WebsocketServer::CreateWebsocketserver(this->app);
 
 		this->server = AllocateWebServer();
 		this->server->SetRouteHandler(this->app);
-		this->server->RegisterUpdateHandler("websocket", this->wsServer);
+		this->server->RegisterUpdateHandler("websocket", this->wsServer.get());
 		this->server->Listen(8080);
 
 		wxLogMessage("Server started!");

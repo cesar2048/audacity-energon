@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include <unordered_set>
 
 #include "WebsocketProtocol.h"
 #include <thread>
@@ -222,51 +223,130 @@ void WebSocketBase::Close()
 class WebSocketImpl : public WebSocketBase {
 	IWebsocketApp* app;
 	std::thread* wsThread;
-	bool alive;
+	bool _alive;
 
 public:
 
 	WebSocketImpl(shared_ptr<IOStream> stream, IWebsocketApp* app)
-		: WebSocketBase(stream), app(app), alive(false)
+		: WebSocketBase(stream), app(app), _alive(false), wsThread(NULL)
 	{
 	}
 
 	~WebSocketImpl()
 	{
-		this->alive = false;
+		this->_alive = false;
+		delete wsThread;
+	}
+
+	void setThread(std::thread* thread) {
+		this->_alive = true;
+		this->wsThread = thread;
+	}
+
+	bool alive() { return this->_alive; }
+
+	void alive(bool status) { this->_alive = status; }
+
+	WebsocketProtocol* protocolHandler() {
+		return &this->protocol;
+	}
+
+	IOStream* getStream() {
+		return this->stream.get();
+	}
+
+	void join() {
 		if (this->wsThread != NULL && this->wsThread->joinable()) {
 			this->wsThread->join();
-			this->wsThread = false;
 		}
 	}
 
-	void StartServerThread() {
-		this->alive = true;
-		this->wsThread = new std::thread(&WebSocketImpl::HandleLoop, this);
+	void Close()
+	{
+		this->_alive = false;
+		WebSocketBase::Close();
+	}
+};
+
+
+// -------------- WebsocketServerImpl -------------------
+
+
+class WebsocketServerImpl : public WebsocketServer
+{
+	unordered_set<WebSocketImpl*> connections;
+	WebsocketProtocol protocol;
+	IWebsocketApp* app;
+
+public:
+	WebsocketServerImpl(IWebsocketApp* app)
+		: app(app)
+	{
+	}
+
+	~WebsocketServerImpl() {
+		auto end = connections.end();
+
+		// flag all threads to finish
+		for (auto it = connections.begin(); it != end; it++) {
+			(*it)->Close();
+		}
+
+		// wait for all threads to end and delete their objects
+		for (auto it = connections.begin(); it != end; it++) {
+			(*it)->join();
+			delete *it;
+		}
+	}
+
+	// Heredado vía IUpgradeHandler
+	virtual shared_ptr<HttpResponseMsg> AcceptUpgrade(HttpRequestMsg* req) override
+	{
+		auto clientKey = req->getHeader("sec-websocket-key");
+		auto res = HttpServer::createResponse();
+		res->setStatus(101);
+		res->setHeader("Upgrade", "websocket");
+		res->setHeader("Connection", "Upgrade");
+		res->setHeader("Sec-WebSocket-Protocol", "recording");
+		res->setHeader("Sec-WebSocket-Accept", this->protocol.CalculateSignature(clientKey->c_str()));
+
+		return res;
+	}
+
+	// Heredado vía IUpgradeHandler
+	virtual void HandleStream(shared_ptr<IOStream> stream) override
+	{
+		WebSocketImpl* ws = new WebSocketImpl(stream, this->app);
+		this->connections.insert(ws);
+		
+		auto thread = new std::thread(&WebsocketServerImpl::HandleLoop, this, ws);
+		ws->setThread(thread);
 	}
 
 private:
 
-	void HandleLoop() {
-		this->app->onOpen(this);
+	void HandleLoop(WebSocketImpl* conn) {
+		app->onOpen(conn);
 
-		while (this->alive) {
+		while (conn->alive()) {
 			Buffer in(2048); // TODO: allow reading of frames bigger than this
-			uint32_t bytesRead = stream->read(in.buffer, in.len);
-			if (bytesRead == 0 && !stream->isconnected())
+			uint32_t bytesRead = conn->getStream()->read(in.buffer, in.len);
+			if (bytesRead == 0 && !conn->getStream()->isconnected())
 			{
-				this->alive = false;
+				conn->alive(false);
 			}
 			else
 			{
-				auto msg = this->protocol.ReadFrame(in.buffer, in.len);
+				auto msg = conn->protocolHandler()->ReadFrame(in.buffer, in.len);
 
 				if (msg->opcode == WSOpcode::TextFrame) {
-					string text((char*) msg->buffer, msg->length);
-					this->app->onMessage(this, text);
-
-				} else if (msg->opcode == WSOpcode::CloseConnection) {
-					this->app->onClose(this);
+					string text((char*)msg->buffer, msg->length);
+					app->onMessage(conn, text);
+				}
+				else if (msg->opcode == WSOpcode::CloseConnection) {
+					// send close response, rfc: https://tools.ietf.org/html/rfc6455#section-1.4
+					conn->Close();
+					app->onClose(conn);
 				}
 			}
 		}
@@ -276,29 +356,8 @@ private:
 
 // --------------- WebsocketServer -------------------
 
-
-WebsocketServer::WebsocketServer(IWebsocketApp* app)
-	:app(app)
+shared_ptr<WebsocketServer> WebsocketServer::CreateWebsocketserver(IWebsocketApp * app)
 {
+	shared_ptr<WebsocketServer> ptr(new WebsocketServerImpl(app));
+	return ptr;
 }
-
-shared_ptr<HttpResponseMsg> WebsocketServer::AcceptUpgrade(HttpRequestMsg* req)
-{
-	auto clientKey = req->getHeader("sec-websocket-key");
-	auto res = HttpServer::createResponse();
-	res->setStatus(101);
-	res->setHeader("Upgrade", "websocket");
-	res->setHeader("Connection", "Upgrade");
-	res->setHeader("Sec-WebSocket-Protocol", "recording");
-	res->setHeader("Sec-WebSocket-Accept", this->protocol.CalculateSignature(clientKey->c_str()));
-
-	return res;
-}
-
-void WebsocketServer::HandleStream(shared_ptr<IOStream> stream)
-{
-	// TODO: fix memory leak
-	WebSocketImpl* ws = new WebSocketImpl(stream, this->app);
-	ws->StartServerThread();
-}
-
