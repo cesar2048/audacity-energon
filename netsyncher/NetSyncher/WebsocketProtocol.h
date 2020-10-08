@@ -61,7 +61,7 @@ public:
 	
 	// Encodes a websocket frame and writes it into the provided buffer
 	// returns how many bytes were actually written
-	uint32_t WriteFrame(WSOpcode opcode, uint8_t* inBuffer, uint32_t inSize, uint8_t* outBuffer, uint32_t outSize, bool mask);
+	uint32_t WriteFrame(WSOpcode opcode, const uint8_t* inBuffer, uint32_t inSize, uint8_t* outBuffer, uint32_t outSize, bool mask);
 
 	// Decodes a websocket frame and writes the plain message 
 	std::shared_ptr<WS_MSG> ReadFrame(uint8_t* buffer, uint32_t length);
@@ -81,7 +81,8 @@ protected:
 public:
 	WebSocketBase(shared_ptr<IOStream> stream);
 
-	void Send(uint8_t* buffer, uint32_t len);
+	void Send(const char* buffer);
+	void Send(const uint8_t* buffer, uint32_t len);
 	void Send(string& message);
 	void Close();
 };

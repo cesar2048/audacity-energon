@@ -55,7 +55,7 @@ char* WebsocketProtocol::CalculateSignature(const char* clientKey) {
 	return b64String;
 }
 
-uint32_t WebsocketProtocol::WriteFrame(WSOpcode opcode, uint8_t* inBuffer, uint32_t inSize, uint8_t* outBuffer, uint32_t outSize,bool mask)
+uint32_t WebsocketProtocol::WriteFrame(WSOpcode opcode, const uint8_t* inBuffer, uint32_t inSize, uint8_t* outBuffer, uint32_t outSize,bool mask)
 {
 	/*
 	  0               1               2               3
@@ -193,7 +193,12 @@ WebSocketBase::WebSocketBase(shared_ptr<IOStream> stream)
 {
 }
 
-void WebSocketBase::Send(uint8_t * buffer, uint32_t len)
+void WebSocketBase::Send(const char * buffer)
+{
+	this->Send((uint8_t*)buffer, strlen(buffer));
+}
+
+void WebSocketBase::Send(const uint8_t * buffer, uint32_t len)
 {
 	if (this->stream != nullptr) {
 		Buffer out(len + MAX_HEADER_BYTES); // length + max overhead

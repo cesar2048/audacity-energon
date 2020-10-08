@@ -5,6 +5,7 @@
 #include <wx/wxprec.h>
 #include <wx/socket.h>
 #include <wx/wxprec.h>
+#include <map>
 
 #include "WebsocketProtocol.h"
 #include "WebApp.h"
@@ -15,6 +16,7 @@ using namespace std;
 class WebApp : public HttpServer::IRouteHandler, public IWebsocketApp
 {
 	NetSynch::NetSyncher* syncher;
+	// map<WebSocketBase*, >
 	
 	// Heredado vía IRouteHandler
 	virtual shared_ptr<HttpResponseMsg> OnRequest(HttpRequestMsg* req) override;

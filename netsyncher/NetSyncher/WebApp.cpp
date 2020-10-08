@@ -2,19 +2,23 @@
 #include "NetSyncher.h"
 
 class ClientObject : public NetSynch::IClientDevice {
+	WebSocketBase* conn;
 
+public:
+	ClientObject(WebSocketBase* conn)
+		: conn(conn)
+	{
+	}
 
 	// Heredado vía IClientDevice
 	virtual void onStartRecording() override
 	{
-		// Buffer msg = Buffer::fromString("Start recording");
-		// Send(msg.buffer, msg.len);
+		conn->Send("Start recording");
 	}
 
 	virtual void onStopRecording() override
 	{
-		// Buffer msg = Buffer::fromString("Stop recording");
-		// Send(msg.buffer, msg.len);
+		conn->Send("Stop recording");
 	}
 };
 
@@ -28,16 +32,20 @@ WebApp::WebApp(NetSynch::NetSyncher * syncher)
 
 void WebApp::onOpen(WebSocketBase * conn)
 {
+	shared_ptr<ClientObject> client(new ClientObject(conn));
+	this->syncher->acceptClient(client);
 	DebugLog("WS: opened connection\n");
 }
 
 void WebApp::onMessage(WebSocketBase * conn, string message)
 {
+	// nothing to do here
 	DebugLog("WS: onmessage: %s\n", message.c_str());
 }
 
 void WebApp::onClose(WebSocketBase * conn)
 {
+	// also, nothing to do here
 	DebugLog("WS: closed connection\n");
 }
 
