@@ -271,6 +271,7 @@ void HttpProtocol::sendResponse(HttpResponseMsg* msg)
 HttpServer::~HttpServer() {
 	if (this->serverThread) {
 		this->isServerThreadAlive = true;
+		this->network->Close();
 		this->serverThread->join();
 		delete this->serverThread;
 	}

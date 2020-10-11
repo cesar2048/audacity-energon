@@ -13,6 +13,7 @@
     This answers when to use the aperstand in the argument,  
     as in `void CTeam::ParseTeam(std::istream &in)`
   * [C++: how to check for null using shared_ptr](https://stackoverflow.com/questions/22220512/check-for-null-in-stdshared-ptr)
+  * [Websocket interface example](https://github.com/TooTallNate/Java-WebSocket/wiki#server-example)
 
 **System resources**:
 

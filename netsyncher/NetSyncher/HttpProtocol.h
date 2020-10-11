@@ -134,6 +134,7 @@ public:
 		public:
 			virtual shared_ptr<IOStream> Accept() = 0;
 			virtual void Listen(int port) = 0;
+			virtual void Close() = 0;
 	};
 
 	/// Route handler interface

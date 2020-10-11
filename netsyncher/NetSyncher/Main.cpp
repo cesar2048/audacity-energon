@@ -3,14 +3,9 @@
 
 #include <iostream>
 #include "NetSyncher.h"
-#include "wx/wxhtml.h"
-
 #include "WebApp.h"
 #include "WxHttpServer.h"
-#include "../qrCodeGen/cpp/QrCode.hpp"
-#include "osinterface.h"
-
-using namespace qrcodegen;
+#include "ConnectionDialog.h"
 
 // ------------ MyApp ---------------------
 
@@ -21,55 +16,11 @@ public:
 
 enum {
 	ID_Hello = 1,
-	ID_Record
+	ID_Record,
+	ID_Connect,
 };
-
-// ------------ QrVisor ---------------------
-
-class QrVisor : public wxScrolledWindow
-{
-	qrcodegen::QrCode code;
-	int moduleSize;
-
-
-public:
-	QrVisor(wxFrame* parent, qrcodegen::QrCode code, int moduleSize = 20)
-		: wxScrolledWindow(parent, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxHSCROLL | wxVSCROLL | wxNO | wxFULL_REPAINT_ON_RESIZE),
-		  code(code),
-		  moduleSize(moduleSize)
-	{
-		int size = code.getSize() * moduleSize;
-		this->SetMinSize(wxSize(size, size+ 40));
-	}
-
-	void OnPaint(wxPaintEvent &event) {
-		wxPaintDC pdc(this);
-		wxDC &dc = pdc;
-
-		dc.SetBackgroundMode(wxSOLID);
-		dc.SetPen(wxPen(*wxBLACK, 0));
-		dc.SetBrush(*wxBLACK_BRUSH);
-
-		const int moduleWidth = this->moduleSize;
-		for (int y = 0; y < code.getSize(); y++) {
-			for (int x = 0; x < code.getSize(); x++) {
-				if (code.getModule(x, y)) {
-					dc.DrawRectangle(x * moduleWidth, y * moduleWidth, moduleWidth, moduleWidth);
-				}
-			}
-		}
-	}
-
-	wxDECLARE_EVENT_TABLE();
-};
-
-wxBEGIN_EVENT_TABLE(QrVisor, wxScrolledWindow)
-	EVT_PAINT(QrVisor::OnPaint)
-wxEND_EVENT_TABLE()
-
 
 // ------------ MyFrame ---------------------
-
 
 class MyFrame : public wxFrame {
 	public:
@@ -122,7 +73,7 @@ MyFrame::MyFrame(const wxString& title, const wxPoint& pos, const wxSize& size)
 
 	{ // menu block
 		wxMenu *menuFile = new wxMenu;
-		menuFile->Append(ID_Hello, "&Start... \tCtrl-H", "Help string shown in status bar from this menu item");
+		menuFile->Append(ID_Hello, "&Connect... \tCtrl-H", "Help string shown in status bar from this menu item");
 		menuFile->AppendSeparator();
 		menuFile->Append(wxID_EXIT);
 
@@ -136,39 +87,22 @@ MyFrame::MyFrame(const wxString& title, const wxPoint& pos, const wxSize& size)
 		SetMenuBar(menuBar);
 	}
 
-	{ // content block
-		vector<string> addresses = FindOSInterfaces(4);
-		string msg = "";
-		auto end = addresses.end();
-		for (auto it = addresses.begin(); it != end; it++) {
-			msg += *it + ",";
-		}
-		
-		qrcodegen::QrCode qr0 = qrcodegen::QrCode::encodeText(msg.c_str(), qrcodegen::QrCode::Ecc::MEDIUM);
-		wxBoxSizer *topSizer = new wxBoxSizer(wxVERTICAL);
-
-		// record button
-		this->btnRecord = new wxButton(this, ID_Record, "Record");
-		Bind(wxEVT_BUTTON, &MyFrame::OnRecord, this, ID_Record);
-		topSizer->Add(this->btnRecord, 0, wxALL, 1);
-
-		QrVisor *canvas = new QrVisor(this, qr0);
-		// canvas->SetMinSize(wxSize(300, 300));
-		topSizer->Add(canvas, 1, wxEXPAND | wxALL, 1);
-
-		// main panel
-		this->SetSizerAndFit(topSizer);
-
-	}
+	// record button
+	wxPanel* panel = new wxPanel(this);
+	this->btnRecord = new wxButton(panel, ID_Record, "Record");
+	Bind(wxEVT_BUTTON, &MyFrame::OnRecord, this, ID_Record);
 
 	CreateStatusBar();
 	SetStatusText("Welcome to wxWidgets!");
 }
 
 void MyFrame::OnExit(wxCommandEvent& event) {
-	Close(true);
 	delete this->app;
 	delete this->ns;
+	this->server.reset();
+	this->wsServer.reset();
+
+	Close(true);
 }
 
 void MyFrame::OnAbout(wxCommandEvent& event) {
@@ -197,7 +131,10 @@ void MyFrame::OnStartServer(wxCommandEvent& event) {
 		this->server->RegisterUpdateHandler("websocket", this->wsServer.get());
 		this->server->Listen(8080);
 
-		wxLogMessage("Server started!");
+		// wxLogMessage("Server started!");
+
+		ConnectionWindow* conn = new ConnectionWindow(this, "Connection", wxPoint(100, 100), wxSize(450, 340));
+		conn->Show();
 	}
 };
 

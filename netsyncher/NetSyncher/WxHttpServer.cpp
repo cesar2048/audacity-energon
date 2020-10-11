@@ -92,11 +92,13 @@ public:
 class WxNetwork : public HttpServer::INetwork {
 	wxSocketServer* server;
 	int port;
+	bool alive;
 
 public:
 	// Heredado vía INetwork
 	virtual void Listen(int port) override
 	{
+		this->alive = true;
 		this->port = port;
 
 		wxIPV4address addr;
@@ -112,7 +114,7 @@ public:
 		WxIOStream* stream = new WxIOStream();
 		bool hasConnection = false;
 
-		while (!hasConnection) {
+		while (this->alive && !hasConnection) {
 			hasConnection = this->server->WaitForAccept(0, 10);
 			if (hasConnection) {
 				DebugLog("Connection accepted\n");
@@ -121,6 +123,13 @@ public:
 		}
 
 		return shared_ptr<IOStream>(stream);
+	}
+
+	// Heredado vía INetwork
+	virtual void Close() override
+	{
+		this->alive = false;
+		this->server->Close();
 	}
 };
 
