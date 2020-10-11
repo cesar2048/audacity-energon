@@ -1,3 +1,7 @@
 #pragma once
+#include <vector>
+#include <string>
 
-void FindOSInterfaces(int family = 0);
+using namespace std;
+
+vector<string> FindOSInterfaces(int type = 0);

@@ -137,9 +137,14 @@ MyFrame::MyFrame(const wxString& title, const wxPoint& pos, const wxSize& size)
 	}
 
 	{ // content block
-		FindOSInterfaces(4);
+		vector<string> addresses = FindOSInterfaces(4);
+		string msg = "";
+		auto end = addresses.end();
+		for (auto it = addresses.begin(); it != end; it++) {
+			msg += *it + ",";
+		}
 		
-		qrcodegen::QrCode qr0 = qrcodegen::QrCode::encodeText("Hello world", qrcodegen::QrCode::Ecc::MEDIUM);
+		qrcodegen::QrCode qr0 = qrcodegen::QrCode::encodeText(msg.c_str(), qrcodegen::QrCode::Ecc::MEDIUM);
 		wxBoxSizer *topSizer = new wxBoxSizer(wxVERTICAL);
 
 		// record button
