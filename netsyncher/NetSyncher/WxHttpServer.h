@@ -1,5 +1,5 @@
 #pragma once
 #include "HttpProtocol.h"
 
-HttpServer* AllocateWebServer();
+shared_ptr<HttpServer> AllocateWebServer();
 

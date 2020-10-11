@@ -83,6 +83,12 @@ public:
 	}
 };
 
+
+
+
+
+
+
 class WxNetwork : public HttpServer::INetwork {
 	wxSocketServer* server;
 	int port;
@@ -117,6 +123,9 @@ public:
 		return shared_ptr<IOStream>(stream);
 	}
 };
+
+
+
 
 class WxWebServer : public HttpServer
 {
@@ -154,8 +163,8 @@ void WritePiecesToFile(const char *fileName, WxIOStream *ios) {
 	fclose(f);
 };
 
-HttpServer* AllocateWebServer()
+shared_ptr<HttpServer> AllocateWebServer()
 {
-	return new WxWebServer();
+	return shared_ptr<HttpServer>(new WxWebServer());
 }
 

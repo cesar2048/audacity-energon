@@ -1,5 +1,6 @@
 #include "HttpProtocol.h"
 #include <stdarg.h>
+#include <string.h>
 #include <chrono>
 
 #include <windows.h>
@@ -360,6 +361,8 @@ shared_ptr<HttpResponseMsg> HttpServer::createResponse()
 
 
 std::chrono::system_clock::time_point last;
+bool isNewLine = true;
+
 void DebugLog(const char *format ...)
 {
 	// how to process variable arguments
@@ -368,6 +371,7 @@ void DebugLog(const char *format ...)
 	char formatBuffer[2048];
 	va_list arg;
 
+	// update time difference
 	std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
 	long elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last).count();
 	last = now;
@@ -375,7 +379,14 @@ void DebugLog(const char *format ...)
 		elapsed = 0;
 	}
 
-	sprintf(formatBuffer, "[%5d], %s", elapsed, format);
+	if (isNewLine) {
+		sprintf(formatBuffer, "[%5d], %s", elapsed, format);
+	} else {
+		sprintf(formatBuffer, "%s", format);
+	}
+
+	const char* lastLF = strrchr(format, '\n');
+	isNewLine = (lastLF != NULL);
 
 	va_start(arg, format);
 	vsprintf(buffer, formatBuffer, arg);
