@@ -137,6 +137,8 @@ MyFrame::MyFrame(const wxString& title, const wxPoint& pos, const wxSize& size)
 	}
 
 	{ // content block
+		FindOSInterfaces(4);
+		
 		qrcodegen::QrCode qr0 = qrcodegen::QrCode::encodeText("Hello world", qrcodegen::QrCode::Ecc::MEDIUM);
 		wxBoxSizer *topSizer = new wxBoxSizer(wxVERTICAL);
 
