@@ -112,17 +112,19 @@ public:
 	virtual shared_ptr<IOStream> Accept() override
 	{
 		WxIOStream* stream = new WxIOStream();
+		shared_ptr<IOStream> result(nullptr);
 		bool hasConnection = false;
 
 		while (this->alive && !hasConnection) {
 			hasConnection = this->server->WaitForAccept(0, 10);
-			if (hasConnection) {
+			if (this->alive && hasConnection) {
 				DebugLog("Connection accepted\n");
 				this->server->AcceptWith(stream->socket, false);
+				result = shared_ptr<IOStream>(stream);
 			}
 		}
 
-		return shared_ptr<IOStream>(stream);
+		return result;
 	}
 
 	// Heredado vía INetwork

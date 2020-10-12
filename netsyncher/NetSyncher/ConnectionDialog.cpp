@@ -1,10 +1,40 @@
 #include "ConnectionDialog.h"
+#include <sstream>
 
 #include "../qrCodeGen/cpp/QrCode.hpp"
 #include "osinterface.h"
 
-
 using namespace qrcodegen;
+
+// ------------ functions ---------------------
+
+string vectorToJson(vector<string> list) {
+	ostringstream ss;
+	ss << "[";
+
+	auto end = list.end();
+	bool isFirst = true;
+	for (auto it = list.begin(); it != end; it++) {
+		if (!isFirst) {
+			ss << ",";
+		}
+		ss << "\"" << (*it) << "\"";
+		isFirst = false;
+	}
+
+	ss << "]";
+
+	return ss.str();
+}
+
+vector<string> filter(vector<string> list, const std::function<bool(string)>& filterFn) {
+	vector<string> result;
+	for (auto& v : list)
+		if (filterFn(v))
+			result.push_back(v);
+
+	return result;
+}
 
 
 // ------------ QrVisor ---------------------
@@ -60,11 +90,11 @@ ConnectionWindow::ConnectionWindow(wxWindow* parent, const wxString& title, cons
 {
 	{ // content block
 		vector<string> addresses = FindOSInterfaces(4);
-		string msg = "";
-		auto end = addresses.end();
-		for (auto it = addresses.begin(); it != end; it++) {
-			msg += *it + ",";
-		}
+		vector<string> importantAddresses = filter(addresses, [=](string item) {
+			// ignoring localhost and link-local (no dhcp) addresses
+			return item.find("127.") != 0 && item.find("169") != 0;
+		});
+		string msg = vectorToJson(importantAddresses);
 
 		qrcodegen::QrCode qr0 = qrcodegen::QrCode::encodeText(msg.c_str(), qrcodegen::QrCode::Ecc::MEDIUM);
 		wxBoxSizer *topSizer = new wxBoxSizer(wxVERTICAL);

@@ -270,7 +270,7 @@ void HttpProtocol::sendResponse(HttpResponseMsg* msg)
 
 HttpServer::~HttpServer() {
 	if (this->serverThread) {
-		this->isServerThreadAlive = true;
+		this->isServerThreadAlive = false;
 		this->network->Close();
 		this->serverThread->join();
 		delete this->serverThread;
@@ -303,30 +303,31 @@ void HttpServer::HandleLoop(/* additional args */) {
 
 	while (this->isServerThreadAlive) {
 		auto stream = this->network->Accept();
+		if (stream != nullptr) {
+			DebugLog("Connection accepted\n");
+			std::chrono::system_clock::time_point ini = std::chrono::system_clock::now();
 
-		DebugLog("Connection accepted\n");
-		std::chrono::system_clock::time_point ini = std::chrono::system_clock::now();
+			HttpProtocol http(stream.get());
+			shared_ptr<HttpRequestMsg> req = http.readRequest();
 
-		HttpProtocol http(stream.get());
-		shared_ptr<HttpRequestMsg> req = http.readRequest();
+			// check for upgrade
+			auto upgrade = req->getHeader("upgrade");
+			auto handler = this->getUpdateHandler(upgrade);
+			if (handler != nullptr) {
+				auto res = handler->AcceptUpgrade(req.get());
+				http.sendResponse(res.get());
 
-		// check for upgrade
-		auto upgrade = req->getHeader("upgrade");
-		auto handler = this->getUpdateHandler(upgrade);
-		if (handler != nullptr) {
-			auto res = handler->AcceptUpgrade(req.get());
-			http.sendResponse(res.get());
+				// delegate connection to the handler
+				handler->HandleStream(stream);
+			}
+			else {
+				auto res = this->handler->OnRequest(req.get());
+				http.sendResponse(res.get());
+				stream->close();
 
-			// delegate connection to the handler
-			handler->HandleStream(stream);
-		}
-		else {
-			auto res = this->handler->OnRequest(req.get());
-			http.sendResponse(res.get());
-			stream->close();
-
-			std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
-			elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - ini).count();
+				std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
+				elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - ini).count();
+			}
 		}
 	}
 }
