@@ -36,6 +36,39 @@ vector<string> filter(vector<string> list, const std::function<bool(string)>& fi
 	return result;
 }
 
+// ------------ JsonConnectInfo ------------
+
+class JsonObject {
+public:
+	virtual string toJsonString() = 0;
+	virtual const char* toCString() = 0;
+};
+
+
+class JsonConnectInfo : public JsonObject {
+	vector<string> addrList;
+
+public:
+	JsonConnectInfo(vector<string> ipAddrList) {
+		this->addrList = filter(ipAddrList, [=](string item) {
+			// ignoring localhost and link-local (no dhcp) addresses
+			return item.find("127.") != 0 && item.find("169") != 0;
+		});
+	}
+
+	// Heredado vía JsonObject
+	virtual string toJsonString() override
+	{
+		string addresses = vectorToJson(this->addrList);
+		return "{\"version\": \"1.0\", \"addresses\":"+addresses+"}";
+	}
+
+	virtual const char* toCString() override
+	{
+		return this->toJsonString().c_str();
+	}
+};
+
 
 // ------------ QrVisor ---------------------
 
@@ -81,22 +114,18 @@ wxBEGIN_EVENT_TABLE(QrVisor, wxScrolledWindow)
 wxEND_EVENT_TABLE()
 
 
-
 wxBEGIN_EVENT_TABLE(ConnectionWindow, wxFrame)
 wxEND_EVENT_TABLE()
+
 
 ConnectionWindow::ConnectionWindow(wxWindow* parent, const wxString& title, const wxPoint& pos, const wxSize& size)
 	: wxFrame(parent, wxID_ANY, title, pos, size)
 {
 	{ // content block
 		vector<string> addresses = FindOSInterfaces(4);
-		vector<string> importantAddresses = filter(addresses, [=](string item) {
-			// ignoring localhost and link-local (no dhcp) addresses
-			return item.find("127.") != 0 && item.find("169") != 0;
-		});
-		string msg = vectorToJson(importantAddresses);
-
-		qrcodegen::QrCode qr0 = qrcodegen::QrCode::encodeText(msg.c_str(), qrcodegen::QrCode::Ecc::MEDIUM);
+		JsonConnectInfo info(addresses);
+		
+		qrcodegen::QrCode qr0 = qrcodegen::QrCode::encodeText(info.toJsonString().c_str(), qrcodegen::QrCode::Ecc::MEDIUM);
 		wxBoxSizer *topSizer = new wxBoxSizer(wxVERTICAL);
 
 		QrVisor *canvas = new QrVisor(this, qr0);
