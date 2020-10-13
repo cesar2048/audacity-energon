@@ -16,14 +16,17 @@ using namespace std;
 class WebApp : public HttpServer::IRouteHandler, public IWebsocketApp
 {
 	NetSynch::NetSyncher* syncher;
-	// map<WebSocketBase*, >
+
+	shared_ptr<HttpResponseMsg> post_upload(HttpRequestMsg* req);
+	shared_ptr<HttpResponseMsg> get(HttpRequestMsg* req);
+	shared_ptr<HttpResponseMsg> not_found(HttpRequestMsg* req);
 	
-	// Heredado vía IRouteHandler
+	// Inherited from IRouteHandler
 	virtual shared_ptr<HttpResponseMsg> OnRequest(HttpRequestMsg* req) override;
 
-	// Heredado vía IWebsocketApp
-	virtual void onOpen(WebSocketBase * conn) override;
+	// Inherited from IWebsocketApp
 	virtual void onMessage(WebSocketBase * conn, string message) override;
+	virtual void onOpen(WebSocketBase * conn) override;
 	virtual void onClose(WebSocketBase * conn) override;
 
 public:

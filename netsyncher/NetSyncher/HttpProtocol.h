@@ -76,6 +76,12 @@ public:
 
 	/// returns a MultipartStream, or null if there is no files to read
 	virtual shared_ptr<MultipartStream> readFile(const char* name) =0;
+
+	/// returns the url from the request
+	virtual string getUrl() =0;
+
+	/// returns the methods (get, post, put, delete, etc)
+	virtual string getMethod() = 0;
 };
 
 typedef shared_ptr<HttpRequestMsg> HttpReqPtr;

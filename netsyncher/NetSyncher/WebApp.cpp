@@ -49,7 +49,8 @@ void WebApp::onClose(WebSocketBase * conn)
 	DebugLog("WS: closed connection\n");
 }
 
-shared_ptr<HttpResponseMsg> WebApp::OnRequest(HttpRequestMsg* req)
+
+shared_ptr<HttpResponseMsg> WebApp::post_upload(HttpRequestMsg * req)
 {
 	char tempLine[2048];
 	shared_ptr<MultipartStream> file = req->readFile("filename");
@@ -73,21 +74,39 @@ shared_ptr<HttpResponseMsg> WebApp::OnRequest(HttpRequestMsg* req)
 	}
 
 	auto res = HttpServer::createResponse();
+	res->setStatus(204);
+	return res;
+}
+
+shared_ptr<HttpResponseMsg> WebApp::get(HttpRequestMsg * req)
+{
+	char tempLine[2048];
+	auto res = HttpServer::createResponse();
 	res->setHeader("Content-Type", "application/json");
-	sprintf_s(tempLine, 2048, "{\n\"Hello\":\"world\",\n"
-		"\"Received\":%d,\n"
-		"\"Expe||2cted\":%d\n}", totalRead, totalExpected);
+	sprintf_s(tempLine, 2048, "{\"Hello\":\"world\"}");
 	res->write(tempLine);
 
 	return res;
 }
 
-/*
-shared_ptr<WebsocketServer::IMessageHandler> WebApp::CreateHandler()
+shared_ptr<HttpResponseMsg> WebApp::not_found(HttpRequestMsg * req)
 {
-	IMessageHandlerPtr ptr(new ClientObject());
-	shared_ptr<NetSynch::IClientDevice> dev = std::dynamic_pointer_cast<NetSynch::IClientDevice>(ptr);
-	this->syncher->acceptClient(dev);
-	return ptr;
+	auto res = HttpServer::createResponse();
+	res->setStatus(404);
+	res->write("Not found");
+	return res;
 }
-*/
+
+shared_ptr<HttpResponseMsg> WebApp::OnRequest(HttpRequestMsg* req)
+{
+	const string uri = req->getUrl();
+	const string method = req->getMethod();
+
+	if (uri == "/") {
+		return this->get(req);
+	} else if (uri == "/upload" && method == "POST") {
+		return this->post_upload(req);
+	} else {
+		return this->not_found(req);
+	}
+}

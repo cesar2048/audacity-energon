@@ -66,18 +66,34 @@ class HttpRequestMsgImpl : public HttpRequestMsg
 public:
 	HttpRequestMsgImpl(IOStream *stream);
 
+	void setHeaders(const map<string, string>& headers);
+
+	void setMethod(const string& method);
+
+	void setUri(const string& uri);
+
 	/// returns a header, or nullptr if the header is not found
 	shared_ptr<string> getHeader(string key);
 
 	/// returns a MultipartStream, or null if there is no files to read
 	shared_ptr<MultipartStream> readFile(const char* name);
 
-	void setHeaders(const map<string, string>& headers);
+	/// returns the url from the request
+	virtual string getUrl() override;
 
-	void setMethod(const string& method);
-
-	void setUri(const string& uri);
+	/// returns the methods (get, post, put, delete, etc)
+	virtual string getMethod();
 };
+
+string HttpRequestMsgImpl::getUrl()
+{
+	return this->uri;
+}
+
+string HttpRequestMsgImpl::getMethod()
+{
+	return this->method;
+}
 
 void HttpRequestMsgImpl::setHeaders(const map<string, string>& headers)
 {
