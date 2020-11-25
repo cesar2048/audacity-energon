@@ -72,6 +72,11 @@ namespace NetSyncherTests
 		// nothing to do here
 	}
 
+	bool StrInputStream::isconnected()
+	{
+		return true;
+	}
+
 
 	// ------------------- TransmissionReader -------------------
 
@@ -141,6 +146,11 @@ namespace NetSyncherTests
 	int TransmissionReader::position()
 	{
 		return totalRead;
+	}
+
+	bool TransmissionReader::isconnected()
+	{
+		return true;
 	}
 
 	void TransmissionReader::close()

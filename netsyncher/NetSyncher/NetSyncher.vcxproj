@@ -167,13 +167,15 @@
   <ItemGroup>
     <ClCompile Include="..\..\qrCodeGen\cpp\QrCode.cpp" />
     <ClCompile Include="base64.c" />
-    <ClCompile Include="ConnectionDialog.cpp" />
+    <ClCompile Include="ConnectionWindow.cpp" />
     <ClCompile Include="HttpProtocol.cpp" />
+    <ClCompile Include="JsonCode.cpp" />
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="MemBuffer.cpp" />
     <ClCompile Include="NetSyncher.cpp" />
     <ClCompile Include="osInterface.cpp" />
     <ClCompile Include="sha1.c" />
+    <ClCompile Include="SyncherCore.cpp" />
     <ClCompile Include="WebApp.cpp" />
     <ClCompile Include="WebsocketProtocol.cpp" />
     <ClCompile Include="WxHttpServer.cpp" />
@@ -181,13 +183,15 @@
   <ItemGroup>
     <ClInclude Include="..\..\qrCodeGen\cpp\QrCode.hpp" />
     <ClInclude Include="base64.h" />
-    <ClInclude Include="ConnectionDialog.h" />
+    <ClInclude Include="ConnectionWindow.h" />
     <ClInclude Include="HttpProtocol.h" />
+    <ClInclude Include="JsonCode.h" />
     <ClInclude Include="MemBuffer.h" />
     <ClInclude Include="NetSyncher.h" />
     <ClInclude Include="osinterface.h" />
     <ClInclude Include="sha1.h" />
     <ClInclude Include="stringextension.h" />
+    <ClInclude Include="SyncherCore.h" />
     <ClInclude Include="WebApp.h" />
     <ClInclude Include="WebsocketProtocol.h" />
     <ClInclude Include="WxHttpServer.h" />

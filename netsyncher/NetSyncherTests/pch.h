@@ -29,6 +29,9 @@ namespace NetSyncherTests {
 		virtual uint32_t read(uint8_t * buffer, uint32_t len) override;
 		virtual uint32_t write(uint8_t* buffer, uint32_t len) override;
 		virtual void close() override;
+
+		// Heredado vía IOStream
+		virtual bool isconnected() override;
 	};
 
 	// Helper class that reads a network transmission previously recorded (reads buffer by buffer as received)
@@ -46,6 +49,9 @@ namespace NetSyncherTests {
 		virtual void close() override;
 
 		int position();
+
+		// Heredado vía IOStream
+		virtual bool isconnected() override;
 	};
 
 }

@@ -2,6 +2,4 @@
 #include <vector>
 #include <string>
 
-using namespace std;
-
-vector<string> FindOSInterfaces(int type = 0);
+std::vector<std::string> FindOSInterfaces(int type = 0);

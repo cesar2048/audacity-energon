@@ -4,6 +4,8 @@
 #include <iphlpapi.h>
 #include <stdio.h>
 
+using namespace std;
+
 #define WORKING_BUFFER_SIZE 15000
 #define MAX_TRIES 3
 
