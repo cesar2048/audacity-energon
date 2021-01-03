@@ -86,6 +86,7 @@ public:
    bool CanStopAudioStream () const;
 
    void OnRecord(bool altAppearance);
+   void OnRecordSync(bool altAppearance);
 
    bool DoRecord(AudacityProject &project,
       const TransportTracks &transportTracks, // If captureTracks is empty, then tracks are created

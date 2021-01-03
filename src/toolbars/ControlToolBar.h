@@ -51,6 +51,7 @@ class ControlToolBar final : public ToolBar {
    void OnPlay(wxCommandEvent & evt);
    void OnStop(wxCommandEvent & evt);
    void OnRecord(wxCommandEvent & evt);
+   void OnRecordSync(wxCommandEvent & evt);
    void OnFF(wxCommandEvent & evt);
    void OnPause(wxCommandEvent & evt);
    void OnIdle(wxIdleEvent & event);
@@ -107,12 +108,14 @@ class ControlToolBar final : public ToolBar {
       ID_FF_BUTTON,
       ID_REW_BUTTON,
       ID_RECORD_BUTTON,
+	  ID_REC_SYNC_BUTTON,
       BUTTON_COUNT,
    };
 
    AButton *mRewind;
    AButton *mPlay;
    AButton *mRecord;
+   AButton *mRecordSync;
    AButton *mPause;
    AButton *mStop;
    AButton *mFF;

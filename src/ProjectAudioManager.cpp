@@ -468,12 +468,6 @@ void ProjectAudioManager::OnRecord(bool altAppearance)
    // Code from CommandHandler start...
    AudacityProject *p = &mProject;
 
-   // creyes
-   int i = 7;
-   wxString Foobar;
-   Foobar.Printf(wxT("Hello I have %d cookies."), i);
-   wxMessageBox(Foobar);
-
    if (p) {
       const auto &selectedRegion = ViewInfo::Get( *p ).selectedRegion;
       double t0 = selectedRegion.t0();
@@ -560,6 +554,17 @@ void ProjectAudioManager::OnRecord(bool altAppearance)
 
       DoRecord(*p, transportTracks, t0, t1, altAppearance, options);
    }
+}
+
+void ProjectAudioManager::OnRecordSync(bool altAppearance)
+{
+	// creyes
+	int i = 7;
+	wxString Foobar;
+	Foobar.Printf(wxT("Hello, starting recording I have %d cookies."), i);
+	wxMessageBox(Foobar);
+
+	this->OnRecord(altAppearance);
 }
 
 bool ProjectAudioManager::UseDuplex()

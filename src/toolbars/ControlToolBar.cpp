@@ -89,6 +89,7 @@ BEGIN_EVENT_TABLE(ControlToolBar, ToolBar)
    EVT_BUTTON(ID_REW_BUTTON,    ControlToolBar::OnRewind)
    EVT_BUTTON(ID_FF_BUTTON,     ControlToolBar::OnFF)
    EVT_BUTTON(ID_PAUSE_BUTTON,  ControlToolBar::OnPause)
+   EVT_BUTTON(ID_REC_SYNC_BUTTON, ControlToolBar::OnRecordSync)
    EVT_IDLE(ControlToolBar::OnIdle)
 END_EVENT_TABLE()
 
@@ -217,6 +218,9 @@ void ControlToolBar::Populate()
 
    mRecord = MakeButton(this, bmpRecord, bmpRecord, bmpRecordDisabled,
       ID_RECORD_BUTTON, false, XO("Record"));
+
+   mRecordSync = MakeButton(this, bmpRecordSync, bmpRecordSync, bmpRecordDisabled,
+	   ID_REC_SYNC_BUTTON, false, XO("Record"));
 
    bool bPreferNewTrack;
    gPrefs->Read("/GUI/PreferNewTrackRecord",&bPreferNewTrack, false);
@@ -365,19 +369,21 @@ void ControlToolBar::ArrangeButtons()
    Add((mSizer = safenew wxBoxSizer(wxHORIZONTAL)), 1, wxEXPAND);
 
    // Start with a little extra space
-   mSizer->Add( 5, 55 );
+   mSizer->Add( 1, 55 );
 
    // Add the buttons in order based on ergonomic setting
    if( mErgonomicTransportButtons )
    {
       mPause->MoveBeforeInTabOrder( mRecord );
       mPlay->MoveBeforeInTabOrder( mRecord );
+	  mRecordSync->MoveBeforeInTabOrder(mRecord);
       mStop->MoveBeforeInTabOrder( mRecord );
       mRewind->MoveBeforeInTabOrder( mRecord );
       mFF->MoveBeforeInTabOrder( mRecord );
 
       mSizer->Add( mPause,  0, flags, 2 );
       mSizer->Add( mPlay,   0, flags, 2 );
+	  mSizer->Add( mRecordSync, 0, flags, 2);
       mSizer->Add( mStop,   0, flags, 2 );
       mSizer->Add( mRewind, 0, flags, 2 );
       mSizer->Add( mFF,     0, flags, 10 );
@@ -387,12 +393,14 @@ void ControlToolBar::ArrangeButtons()
    {
       mRewind->MoveBeforeInTabOrder( mFF );
       mPlay->MoveBeforeInTabOrder( mFF );
+	  mRecordSync->MoveBeforeInTabOrder( mFF );
       mRecord->MoveBeforeInTabOrder( mFF );
       mPause->MoveBeforeInTabOrder( mFF );
       mStop->MoveBeforeInTabOrder( mFF );
 
       mSizer->Add( mRewind, 0, flags, 2 );
       mSizer->Add( mPlay,   0, flags, 2 );
+	  mSizer->Add( mRecordSync, 0, flags, 2);
       mSizer->Add( mRecord, 0, flags, 2 );
       mSizer->Add( mPause,  0, flags, 2 );
       mSizer->Add( mStop,   0, flags, 2 );
@@ -490,6 +498,11 @@ void ControlToolBar::EnableDisableButtons()
       canStop &&
       !(busy && !recording && !paused) &&
       !(playing && !paused)
+   );
+   mRecordSync->SetEnabled(
+	   canStop &&
+	   !(busy && !recording && !paused) &&
+	   !(playing && !paused)
    );
    mStop->SetEnabled(canStop && (playing || recording));
    mRewind->SetEnabled(paused || (!playing && !recording));
@@ -593,6 +606,12 @@ void ControlToolBar::OnRecord(wxCommandEvent &evt)
 
    bool altAppearance = mRecord->WasShiftDown();
    ProjectAudioManager::Get( mProject ).OnRecord( altAppearance );
+}
+
+void ControlToolBar::OnRecordSync(wxCommandEvent &evt)
+{
+	// bool altAppearance = mRecord->WasShiftDown();
+	ProjectAudioManager::Get(mProject).OnRecordSync(false);
 }
 
 void ControlToolBar::OnPause(wxCommandEvent & WXUNUSED(evt))
