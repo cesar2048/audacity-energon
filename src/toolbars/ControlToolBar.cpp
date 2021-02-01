@@ -632,6 +632,7 @@ void ControlToolBar::OnIdle(wxIdleEvent & event)
    bool recording = projectAudioManager.Recording();
    if (!recording) {
       mRecord->PopUp();
+	  mRecordSync->PopUp();
       mRecord->SetAlternateIdx( wxGetKeyState(WXK_SHIFT) ? 1 : 0 );
    }
    else {
