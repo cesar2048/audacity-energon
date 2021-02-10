@@ -88,7 +88,7 @@ struct AudioIOStartStreamOptions
 
    AudacityProject *pProject{};
    MeterPanelBase *captureMeter{}, *playbackMeter{};
-   BoundedEnvelope *envelope; // for time warping
+   const BoundedEnvelope *envelope; // for time warping
    std::shared_ptr< AudioIOListener > listener;
    double rate;
    bool playLooped;
@@ -435,10 +435,6 @@ protected:
       // Use the function above in the callback after consuming samples from the
       // playback ring buffers, during usual straight or looping play
       void TrackTimeUpdate(double realElapsed);
-
-      // Convert a nonnegative real duration to an increment of track time
-      // relative to mT0.
-      double TrackDuration(double realElapsed) const;
 
       // Convert time between mT0 and argument to real duration, according to
       // time track if one is given; result is always nonnegative

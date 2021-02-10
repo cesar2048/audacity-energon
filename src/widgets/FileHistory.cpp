@@ -17,7 +17,6 @@
 #include "FileHistory.h"
 
 #include <wx/defs.h>
-#include <wx/fileconf.h>
 #include <wx/menu.h>
 
 #include "../Internat.h"
@@ -144,6 +143,8 @@ void FileHistory::Save(wxConfigBase & config, const wxString & group)
    }
 
    config.SetPath(wxT(""));
+
+   config.Flush();
 }
 
 void FileHistory::NotifyMenus()

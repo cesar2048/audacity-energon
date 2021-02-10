@@ -43,6 +43,7 @@ class AudacityApp final : public wxApp {
    AudacityApp();
    ~AudacityApp();
    bool OnInit(void) override;
+   bool InitPart2();
    int OnExit(void) override;
    void OnFatalException() override;
    bool OnExceptionInMainLoop() override;
@@ -91,6 +92,7 @@ class AudacityApp final : public wxApp {
 #ifdef __WXMAC__
 
    void MacActivateApp();
+   void MacFinishLaunching();
 
 #endif
 

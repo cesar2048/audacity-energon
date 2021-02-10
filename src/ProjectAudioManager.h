@@ -14,7 +14,6 @@ Paul Licameli split from ProjectManager.h
 #include <memory>
 #include <vector>
 
-#include "AudioIO.h"
 #include "AudioIOListener.h" // to inherit
 #include "ClientData.h" // to inherit
 
@@ -141,6 +140,8 @@ private:
    void OnAudioIONewBlocks(const WaveTrackArray *tracks) override;
    void OnCommitRecording() override;
    void OnSoundActivationThreshold() override;
+
+   void OnCheckpointFailure(wxCommandEvent &evt);
 
    AudacityProject &mProject;
 

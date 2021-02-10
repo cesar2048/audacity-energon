@@ -35,9 +35,6 @@ Paul Licameli split from TrackPanel.cpp
 
 #include <algorithm>
 
-#include <wx/app.h>
-#include <wx/dc.h>
-#include <wx/dcclient.h>
 #include <wx/menu.h>
 
 // Yet another experimental scrub would drag the track under a
@@ -417,6 +414,7 @@ bool Scrubber::MaybeStartScrubbing(wxCoord xx)
             mOptions.delay = (ScrubPollInterval_ms / 1000.0);
             mOptions.isPlayingAtSpeed = false;
             mOptions.isKeyboardScrubbing = false;
+            mOptions.initSpeed = 0;
             mOptions.minSpeed = 0.0;
 #ifdef USE_TRANSCRIPTION_TOOLBAR
             if (!mAlwaysSeeking) {

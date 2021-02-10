@@ -27,10 +27,10 @@
 
 #include "../UndoManager.h"
 
+#include <wx/dcmemory.h>
 #include <wx/defs.h>
 #include <wx/bmpbuttn.h>
 #include <wx/button.h>
-#include <wx/dcmemory.h>
 #include <wx/frame.h>
 #include <wx/image.h>
 #include <wx/imaglist.h>
@@ -1864,7 +1864,7 @@ wxDialog *EffectUI::DialogFactory( wxWindow &parent, EffectHostInterface *pHost,
    const auto &settings = ProjectSettings::Get( project );
    auto &tracks = TrackList::Get( project );
    auto &trackPanel = TrackPanel::Get( project );
-   auto &trackFactory = TrackFactory::Get( project );
+   auto &trackFactory = WaveTrackFactory::Get( project );
    auto rate = settings.GetRate();
    auto &selectedRegion = ViewInfo::Get( project ).selectedRegion;
    auto &commandManager = CommandManager::Get( project );
@@ -1882,7 +1882,10 @@ wxDialog *EffectUI::DialogFactory( wxWindow &parent, EffectHostInterface *pHost,
    if (flags & EffectManager::kConfigured)
    {
       ProjectAudioManager::Get( project ).Stop();
-      SelectUtilities::SelectAllIfNone( project );
+      //Don't Select All if repeating Generator Effect
+      if (!(flags & EffectManager::kConfigured)) {
+         SelectUtilities::SelectAllIfNone(project);
+      }
    }
 
    auto nTracksOriginally = tracks.size();
@@ -1922,6 +1925,7 @@ wxDialog *EffectUI::DialogFactory( wxWindow &parent, EffectHostInterface *pHost,
          EffectRack::Get( context.project ).Add(effect);
       }
 #endif
+      effect->SetUIFlags(flags);
       success = effect->DoEffect(
          rate,
          &tracks,
@@ -1951,15 +1955,38 @@ wxDialog *EffectUI::DialogFactory( wxWindow &parent, EffectHostInterface *pHost,
 
    if (!(flags & EffectManager::kDontRepeatLast))
    {
-      // Only remember a successful effect, don't remember insert,
-      // or analyze effects.
-      if (type == EffectTypeProcess) {
+      // Remember a successful generator, effect, analyzer, or tool Process
          auto shortDesc = em.GetCommandName(ID);
-         MenuManager::Get(project).mLastEffect = ID;
          /* i18n-hint: %s will be the name of the effect which will be
           * repeated if this menu item is chosen */
-         auto lastEffectDesc = XO("Repeat %s").Format( shortDesc );
-         commandManager.Modify(wxT("RepeatLastEffect"), lastEffectDesc);
+         auto lastEffectDesc = XO("Repeat %s").Format(shortDesc);
+         auto& menuManager = MenuManager::Get(project);
+         switch ( type ) {
+         case EffectTypeGenerate:
+            commandManager.Modify(wxT("RepeatLastGenerator"), lastEffectDesc);
+            menuManager.mLastGenerator = ID;
+            menuManager.mRepeatGeneratorFlags = EffectManager::kConfigured;
+            break;
+         case EffectTypeProcess:
+            commandManager.Modify(wxT("RepeatLastEffect"), lastEffectDesc);
+            menuManager.mLastEffect = ID;
+            menuManager.mRepeatEffectFlags = EffectManager::kConfigured;
+            break;
+         case EffectTypeAnalyze:
+            commandManager.Modify(wxT("RepeatLastAnalyzer"), lastEffectDesc);
+            menuManager.mLastAnalyzer = ID;
+            menuManager.mLastAnalyzerRegistration = MenuCreator::repeattypeplugin;
+            menuManager.mRepeatAnalyzerFlags = EffectManager::kConfigured;
+            break;
+         case EffectTypeTool:
+            commandManager.Modify(wxT("RepeatLastTool"), lastEffectDesc);
+            menuManager.mLastTool = ID;
+            menuManager.mLastToolRegistration = MenuCreator::repeattypeplugin;
+            menuManager.mRepeatToolFlags = EffectManager::kConfigured;
+            if (shortDesc == XO("Nyquist Prompt")) {
+               menuManager.mRepeatToolFlags = EffectManager::kRepeatNyquistPrompt;  //Nyquist Prompt is not configured
+            }
+            break;
       }
    }
 

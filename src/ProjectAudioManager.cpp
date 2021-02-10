@@ -65,6 +65,8 @@ ProjectAudioManager::ProjectAudioManager( AudacityProject &project )
 {
    static ProjectStatus::RegisteredStatusWidthFunction
       registerStatusWidthFunction{ StatusWidthFunction };
+   project.Bind( EVT_CHECKPOINT_FAILURE,
+      &ProjectAudioManager::OnCheckpointFailure, this );
 }
 
 ProjectAudioManager::~ProjectAudioManager() = default;
@@ -94,12 +96,12 @@ auto ProjectAudioManager::StatusWidthFunction(
    return {};
 }
 
+/*! @excsafety{Strong} -- For state of mCutPreviewTracks */
 int ProjectAudioManager::PlayPlayRegion(const SelectedRegion &selectedRegion,
                                    const AudioIOStartStreamOptions &options,
                                    PlayMode mode,
                                    bool backwards, /* = false */
                                    bool playWhiteSpace /* = false */)
-// STRONG-GUARANTEE (for state of mCutPreviewTracks)
 {
    auto &projectAudioManager = *this;
    bool canStop = projectAudioManager.CanStopAudioStream();
@@ -365,7 +367,8 @@ void ProjectAudioManager::Stop(bool stopStream /* = true*/)
    }
 
    const auto toolbar = ToolManager::Get( *project ).GetToolBar(ScrubbingBarID);
-   toolbar->EnableDisableButtons();
+   if (toolbar)
+      toolbar->EnableDisableButtons();
 }
 
 void ProjectAudioManager::Pause()
@@ -458,8 +461,8 @@ WaveTrackArray ProjectAudioManager::ChooseExistingRecordingTracks(
    return {};
 }
 
+/*! @excsafety{Strong} -- For state of current project's tracks */
 void ProjectAudioManager::OnRecord(bool altAppearance)
-// STRONG-GUARANTEE (for state of current project's tracks)
 {
    bool bPreferNewTrack;
    gPrefs->Read("/GUI/PreferNewTrackRecord", &bPreferNewTrack, false);
@@ -686,7 +689,7 @@ bool ProjectAudioManager::DoRecord(AudacityProject &project,
 
          Track *first {};
          for (int c = 0; c < recordingChannels; c++) {
-            auto newTrack = TrackFactory::Get( *p ).NewWaveTrack();
+            auto newTrack = WaveTrackFactory::Get( *p ).NewWaveTrack();
             if (!first)
                first = newTrack.get();
 
@@ -814,10 +817,10 @@ void ProjectAudioManager::OnPause()
    }
 }
 
+/*! @excsafety{Strong} -- For state of mCutPreviewTracks*/
 void ProjectAudioManager::SetupCutPreviewTracks(double WXUNUSED(playStart), double cutStart,
                                            double cutEnd, double  WXUNUSED(playEnd))
 
-// STRONG-GUARANTEE (for state of mCutPreviewTracks)
 {
    ClearCutPreviewTracks();
    AudacityProject *p = &mProject;
@@ -833,7 +836,7 @@ void ProjectAudioManager::SetupCutPreviewTracks(double WXUNUSED(playStart), doub
             newTrack->Clear(cutStart, cutEnd);
             cutPreviewTracks->Add( newTrack );
          }
-         // use NOTHROW-GUARANTEE:
+         // use No-throw-guarantee:
          mCutPreviewTracks = cutPreviewTracks;
       }
    }
@@ -890,9 +893,9 @@ void ProjectAudioManager::OnAudioIOStopRecording()
       }
       else {
          // Add to history
-         // We want this to have NOFAIL-GUARANTEE if we get here from exception
+         // We want this to have No-fail-guarantee if we get here from exception
          // handling of recording, and that means we rely on the last autosave
-         // successully committed to the database, not risking a failure
+         // successfully committed to the database, not risking a failure
          history.PushState(XO("Recorded Audio"), XO("Record"),
             UndoPush::NOAUTOSAVE);
 
@@ -903,7 +906,7 @@ void ProjectAudioManager::OnAudioIOStopRecording()
          auto &intervals = gAudioIO->LostCaptureIntervals();
          if (intervals.size()) {
             // Make a track with labels for recording errors
-            auto uTrack = TrackFactory::Get( project ).NewLabelTrack();
+            auto uTrack = std::make_shared<LabelTrack>();
             auto pTrack = uTrack.get();
             tracks.Add( uTrack );
             /* i18n-hint:  A name given to a track, appearing as its menu button.
@@ -921,16 +924,21 @@ void ProjectAudioManager::OnAudioIOStopRecording()
 
             history.ModifyState( true ); // this might fail and throw
 
-            ShowWarningDialog(&window, wxT("DropoutDetected"), XO("\
+            // CallAfter so that we avoid any problems of yielding
+            // to the event loop while still inside the timer callback,
+            // entering StopStream() recursively
+            wxTheApp->CallAfter( [&] {
+               ShowWarningDialog(&window, wxT("DropoutDetected"), XO("\
 Recorded audio was lost at the labeled locations. Possible causes:\n\
 \n\
 Other applications are competing with Audacity for processor time\n\
 \n\
 You are saving directly to a slow external storage device\n\
 "
-               ),
-               false,
-               XXO("Turn off dropout detection"));
+                  ),
+                  false,
+                  XXO("Turn off dropout detection"));
+            });
          }
       }
    }
@@ -956,6 +964,12 @@ void ProjectAudioManager::OnSoundActivationThreshold()
    if ( gAudioIO && &project == gAudioIO->GetOwningProject() ) {
       wxTheApp->CallAfter( [this]{ Pause(); } );
    }
+}
+
+void ProjectAudioManager::OnCheckpointFailure(wxCommandEvent &evt)
+{
+   evt.Skip();
+   Stop();
 }
 
 bool ProjectAudioManager::Playing() const

@@ -85,7 +85,7 @@ own background.
 It is used (a) To group together widgets which need to be refreshed
 together.  A single refresh of the panel causes all the subwindows to
 refresh.  (b) as a base class for some flicker-free classes for which
-the backgorund is never repainted.
+the background is never repainted.
 
 JKC: InvisiblePanel will probably be replaced in time by a mechanism
 for registering for changes.
@@ -115,6 +115,7 @@ for registering for changes.
 #include <wx/bmpbuttn.h>
 #include "../include/audacity/ComponentInterface.h"
 #include "widgets/wxPanelWrapper.h"
+#include "widgets/wxTextCtrlWrapper.h"
 #include "AllThemeResources.h"
 
 #if wxUSE_ACCESSIBILITY
@@ -630,7 +631,7 @@ wxTextCtrl * ShuttleGuiBase::AddTextBox(
    long flags = wxTE_LEFT;
 #endif
 
-   mpWind = pTextCtrl = safenew wxTextCtrl(GetParent(), miId, Value,
+   mpWind = pTextCtrl = safenew wxTextCtrlWrapper(GetParent(), miId, Value,
       wxDefaultPosition, Size, GetStyle( flags ));
 #if wxUSE_ACCESSIBILITY
    // so that name can be set on a standard control
@@ -844,7 +845,8 @@ void ShuttleGuiBase::AddIcon(wxBitmap *pBmp)
    wxBitmapButton * pBtn;
    mpWind = pBtn = safenew wxBitmapButton(GetParent(), miId, *pBmp,
       wxDefaultPosition, wxDefaultSize, GetStyle( wxBU_AUTODRAW ) );
-   pBtn->SetWindowStyle( 0 );
+   pBtn->SetWindowStyle( wxBORDER_NONE  );
+   pBtn->SetCanFocus(false);
    UpdateSizersC();
 }
 
@@ -1761,7 +1763,7 @@ The repeated choice logic can then be taken out of those
 functions.
 
 JKC: This paves the way for doing data validation too,
-though when we add that we wil need to renumber the
+though when we add that we will need to renumber the
 steps.
 */
 bool ShuttleGuiBase::DoStep( int iStep )

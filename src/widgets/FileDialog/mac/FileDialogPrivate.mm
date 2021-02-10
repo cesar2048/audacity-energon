@@ -509,41 +509,36 @@ int FileDialog::ShowModal()
         SetupExtraControls(sPanel);
 
         // PRL:
-        // Hack for bug 1300:  intercept key down events, implement a
-        // Command+V handler, but it's a bit crude.  It always pastes
-        // the entire text field, ignoring the insertion cursor, and ignoring
-        // which control really has the focus.
+        // Hack for bugs 1300/1579: Intercept key down events, implementing
+        // copy/cut/paste, by invoking appropriate selectors. This is done
+        // because we do not use the wxWidgets IDs for the menu equivalents.
         id handler;
-        if (wxTheClipboard->IsSupported(wxDF_TEXT)) {
+        if (wxTheClipboard->IsSupported(wxDF_UNICODETEXT)) {
            handler = [
               NSEvent addLocalMonitorForEventsMatchingMask:NSKeyDownMask
               handler:^NSEvent *(NSEvent *event)
               {
+                 auto app = [NSApplication sharedApplication];
                  if ([event modifierFlags] & NSCommandKeyMask)
                  {
                     auto chars = [event charactersIgnoringModifiers];
-                    auto character = [chars characterAtIndex:0];
-                    if (character == 'v')
+                    if ([chars isEqualToString:@"a"])
                     {
-                       if (wxTheClipboard->Open()) {
-                          wxTextDataObject data;
-                          wxTheClipboard->GetData(data);
-                          wxTheClipboard->Close();
-                          wxString text = data.GetText();
-                          auto rawText = text.utf8_str();
-                          auto length = text.Length();
-                          NSString *myString = [[NSString alloc]
-                             initWithBytes:rawText.data()
-                              length: rawText.length()
-                              encoding: NSUTF8StringEncoding
-                          ];
-                          [sPanel setNameFieldStringValue:myString];
-                          [myString release];
-                          return nil;
-                       }
+                          [app sendAction:@selector(selectAll:) to:nil from:nil];
+                    }
+                    else if ([chars isEqualToString:@"c"])
+                    {
+                          [app sendAction:@selector(copy:) to:nil from:nil];
+                    }
+                    else if ([chars isEqualToString:@"x"])
+                    {
+                          [app sendAction:@selector(cut:) to:nil from:nil];
+                    }
+                    else if ([chars isEqualToString:@"v"])
+                    {
+                          [app sendAction:@selector(paste:) to:nil from:nil];
                     }
                  }
-
                  return event;
               }
            ];
@@ -552,7 +547,7 @@ int FileDialog::ShowModal()
         // makes things more convenient:
         [sPanel setCanCreateDirectories:YES];
         [sPanel setMessage:cf.AsNSString()];
-        // if we should be able to descend into pacakges we must somehow
+        // if we should be able to descend into packages we must somehow
         // be able to pass this in
         [sPanel setTreatsFilePackagesAsDirectories:NO];
         [sPanel setCanSelectHiddenExtension:YES];
@@ -581,7 +576,7 @@ int FileDialog::ShowModal()
         [sPanel setNameFieldStringValue:file.AsNSString()];
         returnCode = [sPanel runModal];
         ModalFinishedCallback(sPanel, returnCode);
-        if (wxTheClipboard->IsSupported(wxDF_TEXT))
+        if (wxTheClipboard->IsSupported(wxDF_UNICODETEXT))
            [NSEvent removeMonitor:handler];
     }
     else

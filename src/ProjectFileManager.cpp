@@ -19,14 +19,10 @@ Paul Licameli split from AudacityProject.cpp
 #endif
 
 #include <wx/frame.h>
-#include "Dependencies.h"
-#include "FileFormats.h"
-#include "FileNames.h"
 #include "Legacy.h"
 #include "PlatformCompatibility.h"
 #include "Project.h"
 #include "ProjectFileIO.h"
-#include "ProjectFileIORegistry.h"
 #include "ProjectFSCK.h"
 #include "ProjectHistory.h"
 #include "ProjectSelectionManager.h"
@@ -35,18 +31,16 @@ Paul Licameli split from AudacityProject.cpp
 #include "ProjectWindow.h"
 #include "SelectUtilities.h"
 #include "SelectionState.h"
-#include "Sequence.h"
 #include "Tags.h"
+#include "TempDirectory.h"
 #include "TrackPanelAx.h"
 #include "TrackPanel.h"
 #include "UndoManager.h"
-#include "WaveClip.h"
 #include "WaveTrack.h"
 #include "wxFileNameWrapper.h"
 #include "export/Export.h"
 #include "import/Import.h"
 #include "import/ImportMIDI.h"
-#include "commands/CommandContext.h"
 #include "toolbars/SelectionBar.h"
 #include "widgets/AudacityMessageBox.h"
 #include "widgets/ErrorDialog.h"
@@ -69,6 +63,24 @@ ProjectFileManager &ProjectFileManager::Get( AudacityProject &project )
 const ProjectFileManager &ProjectFileManager::Get( const AudacityProject &project )
 {
    return Get( const_cast< AudacityProject & >( project ) );
+}
+
+void ProjectFileManager::DiscardAutosave(const FilePath &filename)
+{
+   InvisibleTemporaryProject tempProject;
+   auto &project = tempProject.Project();
+   auto &projectFileManager = Get(project);
+   // Read the project, discarding autosave
+   projectFileManager.ReadProjectFile(filename, true);
+
+   if (projectFileManager.mLastSavedTracks) {
+      for (auto wt : projectFileManager.mLastSavedTracks->Any<WaveTrack>())
+         wt->CloseLock();
+      projectFileManager.mLastSavedTracks.reset();
+   }
+
+   // Side-effect on database is done, and destructor of tempProject
+   // closes the temporary project properly
 }
 
 ProjectFileManager::ProjectFileManager( AudacityProject &project )
@@ -126,7 +138,8 @@ wxString FindHelpUrl( const TranslatableString &libraryError )
 
 }
 
-auto ProjectFileManager::ReadProjectFile( const FilePath &fileName )
+auto ProjectFileManager::ReadProjectFile(
+   const FilePath &fileName, bool discardAutosave )
   -> ReadProjectResults
 {
    auto &project = mProject;
@@ -136,20 +149,23 @@ auto ProjectFileManager::ReadProjectFile( const FilePath &fileName )
    ///
    /// Parse project file
    ///
-   bool bParseSuccess = projectFileIO.LoadProject(fileName);
+   bool bParseSuccess = projectFileIO.LoadProject(fileName, discardAutosave);
    
    bool err = false;
 
    if (bParseSuccess)
    {
-      if (projectFileIO.IsRecovered())
-      {
+      if (discardAutosave)
+         // REVIEW: Failure OK?
+         projectFileIO.AutoSaveDelete();
+      else if (projectFileIO.IsRecovered()) {
          bool resaved = false;
 
          if (!projectFileIO.IsTemporary())
          {
-            projectFileIO.SaveProject(fileName);
-            resaved = true;
+            // Re-save non-temporary project to its own path.  This
+            // might fail to update the document blob in the database.
+            resaved = projectFileIO.SaveProject(fileName, nullptr);
          }
 
          AudacityMessageBox(
@@ -253,6 +269,11 @@ bool ProjectFileManager::DoSave(const FilePath & fileName, const bool fromSaveAs
 
    // Some confirmation dialogs
    {
+      if (TempDirectory::FATFilesystemDenied(fileName, XO("Projects cannot be saved to FAT drives.")))
+      {
+         return false;
+      }
+
       auto &tracks = TrackList::Get( proj );
       if (!tracks.Any())
       {
@@ -271,57 +292,63 @@ bool ProjectFileManager::DoSave(const FilePath & fileName, const bool fromSaveAs
             }
          }
       }
+
+      wxULongLong fileSize = wxFileName::GetSize(projectFileIO.GetFileName());
+
+      wxDiskspaceSize_t freeSpace;
+      if (wxGetDiskSpace(FileNames::AbbreviatePath(fileName), NULL, &freeSpace))
+      {
+         if (freeSpace.GetValue() <= fileSize.GetValue())
+         {
+            ShowErrorDialog(
+               &window,
+               XO("Insufficient Disk Space"),
+               XO("The project size exceeds the available free space on the target disk.\n\n"
+                  "Please select a different disk with more free space."),
+               "Error:_Disk_full_or_not_writable"
+               );
+
+            return false;
+         }
+      }
    }
    // End of confirmations
 
    // Always save a backup of the original project file
-   wxString safetyFileName;
+   Optional<ProjectFileIO::BackupProject> pBackupProject;
    if (fromSaveAs && wxFileExists(fileName))
    {
-#ifdef __WXGTK__
-      safetyFileName = fileName + wxT("~");
-#else
-      safetyFileName = fileName + wxT(".bak");
-#endif
+      pBackupProject.emplace(projectFileIO, fileName);
+      if (!pBackupProject->IsOk())
+         return false;
+   }
 
-      if (wxFileExists(safetyFileName))
+   if (FileNames::IsOnFATFileSystem(fileName))
+   {
+      if (wxFileName::GetSize(projectFileIO.GetFileName()) > UINT32_MAX)
       {
-         wxRemoveFile(safetyFileName);
-      }
-
-      if ( !wxRenameFile(fileName, safetyFileName) )
-      {
-         AudacityMessageBox(
-            XO(
-"Audacity failed to write file %s.\nPerhaps disk is full or not writable.")
-               .Format(safetyFileName),
-            XO("Error Writing to File"),
-            wxICON_STOP,
-            &window);
+         ShowErrorDialog(
+            &window,
+            XO("Error Saving Project"),
+            XO("The project exceeds the maximum size of 4GB when writing to a FAT32 formatted filesystem."),
+            "Error:_Unsuitable_drive"
+            );
          return false;
       }
    }
 
-   bool success = projectFileIO.SaveProject(fileName);
+   bool success = projectFileIO.SaveProject(fileName, mLastSavedTracks.get());
    if (!success)
    {
-      AudacityMessageBox(
-         XO(
-"Could not save project. Perhaps %s \nis not writable or the disk is full.")
-            .Format(fileName),
-         XO("Error Saving Project"),
-         wxICON_ERROR,
-         &window);
-
-      if (fromSaveAs)
-      {
-         if (wxFileExists(fileName))
-         {
-            wxRemoveFile(fileName);
-         }
-         wxRename(safetyFileName, fileName);
-      }
-
+      // Show this error only if we didn't fail reconnection in SaveProject
+      // REVIEW: Could HasConnection() be true but SaveProject() still have failed?
+      if (!projectFileIO.HasConnection())
+         ShowErrorDialog(
+            &window,
+            XO("Error Saving Project"),
+            FileException::WriteFailureMessage(fileName),
+            "Error:_Disk_full_or_not_writable"
+            );
       return false;
    }
 
@@ -344,12 +371,9 @@ bool ProjectFileManager::DoSave(const FilePath & fileName, const bool fromSaveAs
    }
 
    // If we get here, saving the project was successful, so we can DELETE
-   // the .bak file (because it now does not fit our block files anymore
-   // anyway).
-   if (!safetyFileName.empty())
-   {
-      wxRemoveFile(safetyFileName);
-   }
+   // any backup project.
+   if (pBackupProject)
+      pBackupProject->Discard();
 
    return true;
 }
@@ -391,11 +415,11 @@ bool ProjectFileManager::SaveAs()
    auto &projectFileIO = ProjectFileIO::Get( project );
    auto &window = GetProjectFrame( project );
    TitleRestorer Restorer( window, project ); // RAII
-   bool bHasPath = true;
    wxFileName filename;
-   
+   FilePath defaultSavePath = FileNames::FindDefaultPath(FileNames::Operation::Save);
+
    if (projectFileIO.IsTemporary()) {
-      filename = FileNames::DefaultToDocumentsFolder(wxT("/SaveAs/Path"));
+      filename.SetPath(defaultSavePath);
       filename.SetName(project.GetProjectName());
    }
    else {
@@ -404,8 +428,7 @@ bool ProjectFileManager::SaveAs()
 
    // Bug 1304: Set a default file path if none was given.  For Save/SaveAs/SaveCopy
    if( !FileNames::IsPathAvailable( filename.GetPath( wxPATH_GET_VOLUME| wxPATH_GET_SEPARATOR) ) ){
-      bHasPath = false;
-      filename.SetPath(FileNames::DefaultToDocumentsFolder(wxT("/SaveAs/Path")).GetPath());
+      filename.SetPath(defaultSavePath);
    }
 
    TranslatableString title = XO("%sSave Project \"%s\" As...")
@@ -414,8 +437,7 @@ bool ProjectFileManager::SaveAs()
 'Save Project' is for an Audacity project, not an audio file.\n\
 For an audio file that will open in other apps, use 'Export'.\n");
 
-   if (ShowWarningDialog(&window, wxT("FirstProjectSave"), message, true) != wxID_OK)
-   {
+   if (ShowWarningDialog(&window, wxT("FirstProjectSave"), message, true) != wxID_OK) {
       return false;
    }
 
@@ -427,7 +449,7 @@ For an audio file that will open in other apps, use 'Export'.\n");
       if (bPrompt) {
          // JKC: I removed 'wxFD_OVERWRITE_PROMPT' because we are checking
          // for overwrite ourselves later, and we disallow it.
-         fName = FileNames::SelectFile(FileNames::Operation::Export,
+         fName = FileNames::SelectFile(FileNames::Operation::Save,
             title,
             filename.GetPath(),
             filename.GetFullName(),
@@ -500,8 +522,7 @@ For an audio file that will open in other apps, use 'Export'.\n");
                return false;
             }
          }
-         else
-         {
+         else {
             // Overwrite disallowed. The destination project is open in another window.
             AudacityMessageDialog m(
                nullptr,
@@ -520,11 +541,6 @@ For an audio file that will open in other apps, use 'Export'.\n");
    auto success = DoSave(fName, !bOwnsNewName);
    if (success) {
       FileHistory::Global().Append( projectFileIO.GetFileName() );
-      if( !bHasPath )
-      {
-         gPrefs->Write( wxT("/SaveAs/Path"), filename.GetPath());
-         gPrefs->Flush();
-      }
    }
 
    return(success);
@@ -537,24 +553,24 @@ bool ProjectFileManager::SaveCopy(const FilePath &fileName /* = wxT("") */)
    auto &window = GetProjectFrame(project);
    TitleRestorer Restorer(window, project); // RAII
    wxFileName filename = fileName;
+   FilePath defaultSavePath = FileNames::FindDefaultPath(FileNames::Operation::Save);
 
    if (fileName.empty())
    {
       if (projectFileIO.IsTemporary())
       {
-         filename = FileNames::DefaultToDocumentsFolder(wxT("/SaveAs/Path"));
+         filename.SetPath(defaultSavePath);
       }
       else
       {
          filename = projectFileIO.GetFileName();
-         filename.SetFullName(wxT(""));
       }
    }
 
    // Bug 1304: Set a default file path if none was given.  For Save/SaveAs/SaveCopy
    if (!FileNames::IsPathAvailable(filename.GetPath(wxPATH_GET_VOLUME | wxPATH_GET_SEPARATOR)))
    {
-      filename.SetPath(FileNames::DefaultToDocumentsFolder(wxT("/SaveAs/Path")).GetPath());
+      filename.SetPath(defaultSavePath);
    }
 
    TranslatableString title =
@@ -570,8 +586,9 @@ bool ProjectFileManager::SaveCopy(const FilePath &fileName /* = wxT("") */)
       {
          // JKC: I removed 'wxFD_OVERWRITE_PROMPT' because we are checking
          // for overwrite ourselves later, and we disallow it.
-         // We disallow overwrite because we would have to DELETE the many
-         // smaller files too, or prompt to move them.
+         // Previously we disallowed overwrite because we would have had 
+         // to DELETE the many smaller files too, or prompt to move them.
+         // Maybe we could allow it now that we have aup3 format?
          fName = FileNames::SelectFile(FileNames::Operation::Export,
                                        title,
                                        filename.GetPath(),
@@ -591,6 +608,16 @@ bool ProjectFileManager::SaveCopy(const FilePath &fileName /* = wxT("") */)
 
       filename.SetExt(wxT("aup3"));
 
+      if (TempDirectory::FATFilesystemDenied(filename.GetFullPath(), XO("Projects cannot be saved to FAT drives.")))
+      {
+         if (project.mBatchMode)
+         {
+            return false;
+         }
+
+         continue;
+      }
+
       if (filename.FileExists())
       {
          // Saving a copy of the project should never overwrite an existing project.
@@ -608,18 +635,54 @@ bool ProjectFileManager::SaveCopy(const FilePath &fileName /* = wxT("") */)
          continue;
       }
 
+      wxULongLong fileSize = wxFileName::GetSize(projectFileIO.GetFileName());
+
+      wxDiskspaceSize_t freeSpace;
+      if (wxGetDiskSpace(FileNames::AbbreviatePath(filename.GetFullPath()), NULL, &freeSpace))
+      {
+         if (freeSpace.GetValue() <= fileSize.GetValue())
+         {
+            ShowErrorDialog(
+               &window,
+               XO("Insufficient Disk Space"),
+               XO("The project size exceeds the available free space on the target disk.\n\n"
+                  "Please select a different disk with more free space."),
+               "Error:_Unsuitable_drive"
+               );
+
+            continue;
+         }
+      }
+
+      if (FileNames::IsOnFATFileSystem(filename.GetFullPath()))
+      {
+         if (fileSize > UINT32_MAX)
+         {
+            ShowErrorDialog(
+               &window,
+               XO("Error Saving Project"),
+               XO("The project exceeds the maximum size of 4GB when writing to a FAT32 formatted filesystem."),
+               "Error:_Unsuitable_drive"
+               );
+
+            if (project.mBatchMode)
+            {
+               return false;
+            }
+
+            continue;
+         }
+      }
+
       fName = filename.GetFullPath();
       break;
    } while (bPrompt);
 
-   if (!projectFileIO.SaveCopy(filename.GetFullPath()))
+   if (!projectFileIO.SaveCopy(fName))
    {
-      // Overwrite disallowed. The destination project is open in another window.
+      auto msg = FileException::WriteFailureMessage(fName);
       AudacityMessageDialog m(
-         nullptr,
-         XO("The project will not saved because the selected project is open in another window.\nPlease try again and select an original name."),
-         XO("Error Saving Project"),
-         wxOK | wxICON_ERROR);
+         nullptr, msg, XO("Error Saving Project"), wxOK | wxICON_ERROR);
 
       m.ShowModal();
 
@@ -627,28 +690,6 @@ bool ProjectFileManager::SaveCopy(const FilePath &fileName /* = wxT("") */)
    }
 
    return true;
-}
-
-void ProjectFileManager::Reset()
-{
-   // Lock all blocks in all tracks of the last saved version, so that
-   // the sample blocks aren't deleted from the database when we destroy the
-   // sample block objects in memory.
-   if (mLastSavedTracks)
-   {
-      auto &project = mProject;
-      auto &projectFileIO = ProjectFileIO::Get(project);
-
-      for (auto wt : mLastSavedTracks->Any<WaveTrack>())
-      {
-         wt->CloseLock();
-      }
-
-      mLastSavedTracks->Clear();
-      mLastSavedTracks.reset();
-   }
-   
-   ProjectFileIO::Get( mProject ).Reset();
 }
 
 bool ProjectFileManager::SaveFromTimerRecording(wxFileName fnFile)
@@ -684,7 +725,7 @@ bool ProjectFileManager::SaveFromTimerRecording(wxFileName fnFile)
    return success;
 }
 
-void ProjectFileManager::VacuumProject()
+void ProjectFileManager::CompactProjectOnClose()
 {
    auto &project = mProject;
    auto &projectFileIO = ProjectFileIO::Get(project);
@@ -699,9 +740,28 @@ void ProjectFileManager::VacuumProject()
          wt->CloseLock();
       }
 
-      // Attempt to vacuum the project
-      projectFileIO.Vacuum(mLastSavedTracks);
+      // Attempt to compact the project
+      projectFileIO.Compact( { mLastSavedTracks.get() } );
+
+      if ( !projectFileIO.WasCompacted() &&
+          UndoManager::Get( project ).UnsavedChanges() ) {
+         // If compaction failed, we must do some work in case of close
+         // without save.  Don't leave the document blob from the last
+         // push of undo history, when that undo state may get purged
+         // with deletion of some new sample blocks.
+         // REVIEW: UpdateSaved() might fail too.  Do we need to test 
+         // for that and report it?
+         projectFileIO.UpdateSaved( mLastSavedTracks.get() );
+      }
    }
+}
+
+bool ProjectFileManager::OpenProject()
+{
+   auto &project = mProject;
+   auto &projectFileIO = ProjectFileIO::Get(project);
+
+   return projectFileIO.OpenProject();
 }
 
 void ProjectFileManager::CloseProject()
@@ -711,7 +771,7 @@ void ProjectFileManager::CloseProject()
 
    projectFileIO.CloseProject();
 
-   // Blocks were locked in VacuumProject, so DELETE the data structure so that
+   // Blocks were locked in CompactProjectOnClose, so DELETE the data structure so that
    // there's no memory leak.
    if (mLastSavedTracks)
    {
@@ -721,14 +781,14 @@ void ProjectFileManager::CloseProject()
 }
 
 // static method, can be called outside of a project
-wxArrayString ProjectFileManager::ShowOpenDialog(
+wxArrayString ProjectFileManager::ShowOpenDialog(FileNames::Operation op,
    const FileNames::FileType &extraType )
 {
    // Construct the filter
    const auto fileTypes = Importer::Get().GetFileTypes( extraType );
 
    // Retrieve saved path
-   auto path = FileNames::FindDefaultPath(FileNames::Operation::Open);
+   auto path = FileNames::FindDefaultPath(op);
 
    // Construct and display the file dialog
    wxArrayString selected;
@@ -754,7 +814,11 @@ wxArrayString ProjectFileManager::ShowOpenDialog(
    if (dialogResult == wxID_OK) {
       // Return the selected files
       dlog.GetPaths(selected);
+
+      // Remember the directory
+      FileNames::UpdateDefaultPath(op, ::wxPathOnly(dlog.GetPath()));
    }
+
    return selected;
 }
 
@@ -781,72 +845,6 @@ bool ProjectFileManager::IsAlreadyOpen(const FilePath &projPathName)
    return false;
 }
 
-// XML handler for <import> tag
-class ImportXMLTagHandler final : public XMLTagHandler
-{
- public:
-   ImportXMLTagHandler(AudacityProject* pProject) { mProject = pProject; }
-
-   bool HandleXMLTag(const wxChar *tag, const wxChar **attrs) override;
-   XMLTagHandler *HandleXMLChild(const wxChar * WXUNUSED(tag))  override
-      { return NULL; }
-
-   // Don't want a WriteXML method because ImportXMLTagHandler is not a WaveTrack.
-   // <import> tags are instead written by AudacityProject::WriteXML.
-   //    void WriteXML(XMLWriter &xmlFile) /* not override */ { wxASSERT(false); }
-
- private:
-   AudacityProject* mProject;
-};
-
-bool ImportXMLTagHandler::HandleXMLTag(const wxChar *tag, const wxChar **attrs)
-{
-   if (wxStrcmp(tag, wxT("import")) || attrs==NULL || (*attrs)==NULL || wxStrcmp(*attrs++, wxT("filename")))
-       return false;
-   wxString strAttr = *attrs;
-
-   WaveTrackArray trackArray;
-
-   // Guard this call so that C++ exceptions don't propagate through
-   // the expat library
-   GuardedCall(
-      [&] {
-         ProjectFileManager::Get( *mProject ).Import(strAttr, &trackArray); },
-      [&] (AudacityException*) { trackArray.clear(); }
-   );
-
-   if (trackArray.empty())
-      return false;
-
-   // Handle other attributes, now that we have the tracks.
-   attrs++;
-   const wxChar** pAttr;
-   bool bSuccess = true;
-
-   for (size_t i = 0; i < trackArray.size(); i++)
-   {
-      // Most of the "import" tag attributes are the same as for "wavetrack" tags,
-      // so apply them via WaveTrack::HandleXMLTag().
-      bSuccess = trackArray[i]->HandleXMLTag(wxT("wavetrack"), attrs);
-
-      // "offset" tag is ignored in WaveTrack::HandleXMLTag except for legacy projects,
-      // so handle it here.
-      double dblValue;
-      pAttr = attrs;
-      while (*pAttr)
-      {
-         const wxChar *attr = *pAttr++;
-         const wxChar *value = *pAttr++;
-         const wxString strValue = value;
-         if (!wxStrcmp(attr, wxT("offset")) &&
-               XMLValueChecker::IsGoodString(strValue) &&
-               Internat::CompatibleToDouble(strValue, &dblValue))
-            trackArray[i]->SetOffset(dblValue);
-      }
-   }
-   return bSuccess;
-};
-
 // FIXME:? TRAP_ERR This should return a result that is checked.
 //    See comment in AudacityApp::MRUOpen().
 void ProjectFileManager::OpenFile(const FilePath &fileNameArg, bool addtohistory)
@@ -861,8 +859,14 @@ void ProjectFileManager::OpenFile(const FilePath &fileNameArg, bool addtohistory
    // On Win32, we may be given a short (DOS-compatible) file name on rare
    // occasions (e.g. stuff like "C:\PROGRA~1\AUDACI~1\PROJEC~1.AUP"). We
    // convert these to long file name first.
-   auto fileName = PlatformCompatibility::ConvertSlashInFileName(
-      PlatformCompatibility::GetLongFileName(fileNameArg));
+   auto fileName = PlatformCompatibility::GetLongFileName(fileNameArg);
+
+   if (TempDirectory::FATFilesystemDenied(fileName,
+                                      XO("Project resides on FAT formatted drive.\n"
+                                         "Copy it to another drive to open it.")))
+   {
+      return;
+   }
 
    // Make sure it isn't already open.
    // Vaughan, 2011-03-25: This was done previously in AudacityProject::OpenFiles()
@@ -888,6 +892,7 @@ void ProjectFileManager::OpenFile(const FilePath &fileNameArg, bool addtohistory
       return;
    }
 
+printf("fileexists %d\n", wxFileExists(fileName));
    if (!::wxFileExists(fileName)) {
       AudacityMessageBox(
          XO("Could not open file: %s").Format( fileName ),
@@ -1025,10 +1030,10 @@ void ProjectFileManager::OpenFile(const FilePath &fileNameArg, bool addtohistory
    }
 }
 
-std::vector< std::shared_ptr< Track > >
+void
 ProjectFileManager::AddImportedTracks(const FilePath &fileName,
                                       TrackHolders &&newTracks)
-   {
+{
    auto &project = mProject;
    auto &history = ProjectHistory::Get( project );
    auto &projectFileIO = ProjectFileIO::Get( project );
@@ -1044,6 +1049,18 @@ ProjectFileManager::AddImportedTracks(const FilePath &fileName,
    double newRate = 0;
    wxString trackNameBase = fn.GetName();
    int i = -1;
+   
+   // Fix the bug 2109.
+   // In case the project had soloed tracks before importing,
+   // all newly imported tracks are muted.
+   const bool projectHasSolo =
+      !(tracks.Any<PlayableTrack>() + &PlayableTrack::GetSolo).empty();
+   if (projectHasSolo)
+   {
+      for (auto& track : newTracks)
+         for (auto& channel : track)
+            channel->SetMute(true);
+   }
 
    // Must add all tracks first (before using Track::IsLeader)
    for (auto &group : newTracks) {
@@ -1112,18 +1129,41 @@ ProjectFileManager::AddImportedTracks(const FilePath &fileName,
    // the filename to the just imported path.
    if (initiallyEmpty && projectFileIO.IsTemporary()) {
       project.SetProjectName(fn.GetName());
+      project.SetInitialImportPath(fn.GetPath());
       projectFileIO.SetProjectTitle();
    }
 
    // Moved this call to higher levels to prevent flicker redrawing everything on each file.
    //   HandleResize();
+}
 
-   return results;
+namespace {
+bool ImportProject(AudacityProject &dest, const FilePath &fileName)
+{
+   InvisibleTemporaryProject temp;
+   auto &project = temp.Project();
+
+   auto &projectFileIO = ProjectFileIO::Get(project);
+   if (!projectFileIO.LoadProject(fileName, false))
+      return false;
+   auto &srcTracks = TrackList::Get(project);
+   auto &destTracks = TrackList::Get(dest);
+   for (const Track *pTrack : srcTracks.Any()) {
+      auto destTrack = pTrack->PasteInto(dest);
+      Track::FinishCopy(pTrack, destTrack.get());
+      if (destTrack.use_count() == 1)
+         destTracks.Add(destTrack);
+   }
+   Tags::Get(dest).Merge(Tags::Get(project));
+
+   return true;
+}
 }
 
 // If pNewTrackList is passed in non-NULL, it gets filled with the pointers to NEW tracks.
 bool ProjectFileManager::Import(
-   const FilePath &fileName, WaveTrackArray* pTrackArray /*= NULL*/)
+   const FilePath &fileName,
+   bool addToHistory /* = true */)
 {
    auto &project = mProject;
    auto &projectFileIO = ProjectFileIO::Get(project);
@@ -1132,26 +1172,41 @@ bool ProjectFileManager::Import(
    TrackHolders newTracks;
    TranslatableString errorMessage;
 
+#ifdef EXPERIMENTAL_IMPORT_AUP3
    // Handle AUP3 ("project") files directly
    if (fileName.AfterLast('.').IsSameAs(wxT("aup3"), false)) {
-
-      if (projectFileIO.ImportProject(fileName)) {
+      if (ImportProject(project, fileName)) {
          auto &history = ProjectHistory::Get(project);
 
          // If the project was clean and temporary (not permanently saved), then set
          // the filename to the just imported path.
          if (initiallyEmpty && projectFileIO.IsTemporary()) {
-            project.SetProjectName(wxFileName(fileName).GetName());
+            wxFileName fn(fileName);
+            project.SetProjectName(fn.GetName());
+            project.SetInitialImportPath(fn.GetPath());
             projectFileIO.SetProjectTitle();
          }
 
          history.PushState(XO("Imported '%s'").Format(fileName), XO("Import"));
 
-         FileHistory::Global().Append(fileName);
+         if (addToHistory) {
+            FileHistory::Global().Append(fileName);
+         }
+      }
+      else {
+         errorMessage = projectFileIO.GetLastError();
+         if (errorMessage.empty()) {
+            errorMessage = XO("Failed to import project");
+         }
+
+         // Additional help via a Help button links to the manual.
+         ShowErrorDialog(&GetProjectFrame( project ),XO("Error Importing"),
+                         errorMessage, wxT("Importing_Audio"));
       }
 
       return false;
    }
+#endif
 
    {
       // Backup Tags, before the import.  Be prepared to roll back changes.
@@ -1163,12 +1218,20 @@ bool ProjectFileManager::Import(
       auto newTags = oldTags->Duplicate();
       Tags::Set( project, newTags );
 
+#ifndef EXPERIMENTAL_IMPORT_AUP3
+      // Handle AUP3 ("project") files specially
+      if (fileName.AfterLast('.').IsSameAs(wxT("aup3"), false)) {
+         ShowErrorDialog(&GetProjectFrame( project ), XO("Error Importing"),
+            XO( "Cannot import AUP3 format.  Use File > Open instead"),
+            wxT("File_Menu"));
+         return false;
+      }
+#endif
       bool success = Importer::Get().Import(project, fileName,
-                                            &TrackFactory::Get( project ),
+                                            &WaveTrackFactory::Get( project ),
                                             newTracks,
                                             newTags.get(),
                                             errorMessage);
-
       if (!errorMessage.empty()) {
          // Error message derived from Importer::Import
          // Additional help via a Help button links to the manual.
@@ -1178,7 +1241,9 @@ bool ProjectFileManager::Import(
       if (!success)
          return false;
 
-      FileHistory::Global().Append(fileName);
+      if (addToHistory) {
+         FileHistory::Global().Append(fileName);
+      }
 
       // no more errors, commit
       committed = true;
@@ -1200,7 +1265,9 @@ bool ProjectFileManager::Import(
       // If the project was clean and temporary (not permanently saved), then set
       // the filename to the just imported path.
       if (initiallyEmpty && projectFileIO.IsTemporary()) {
-         project.SetProjectName(wxFileName(fileName).GetName());
+         wxFileName fn(fileName);
+         project.SetProjectName(fn.GetName());
+         project.SetInitialImportPath(fn.GetPath());
          projectFileIO.SetProjectTitle();
       }
 
@@ -1212,15 +1279,139 @@ bool ProjectFileManager::Import(
    }
 
    // PRL: Undo history is incremented inside this:
-   auto newSharedTracks = AddImportedTracks(fileName, std::move(newTracks));
-
-   if (pTrackArray) {
-      for (const auto &newTrack : newSharedTracks) {
-         newTrack->TypeSwitch( [&](WaveTrack *wt) {
-            pTrackArray->push_back( wt->SharedPointer< WaveTrack >() );
-         });
-      }
-   }
+   AddImportedTracks(fileName, std::move(newTracks));
 
    return true;
+}
+
+#include "Clipboard.h"
+#include "ShuttleGui.h"
+#include "widgets/HelpSystem.h"
+
+// Compact dialog
+namespace {
+class CompactDialog : public wxDialogWrapper
+{
+public:
+   CompactDialog(TranslatableString text)
+   :  wxDialogWrapper(nullptr, wxID_ANY, XO("Compact Project"))
+   {
+      ShuttleGui S(this, eIsCreating);
+
+      S.StartVerticalLay(true);
+      {
+         S.AddFixedText(text, false, 500);
+
+         S.AddStandardButtons(eYesButton | eNoButton | eHelpButton);
+      }
+      S.EndVerticalLay();
+
+      FindWindowById(wxID_YES, this)->Bind(wxEVT_BUTTON, &CompactDialog::OnYes, this);
+      FindWindowById(wxID_NO, this)->Bind(wxEVT_BUTTON, &CompactDialog::OnNo, this);
+      FindWindowById(wxID_HELP, this)->Bind(wxEVT_BUTTON, &CompactDialog::OnGetURL, this);
+
+      Layout();
+      Fit();
+      Center();
+   }
+
+   void OnYes(wxCommandEvent &WXUNUSED(evt))
+   {
+      EndModal(wxYES);
+   }
+
+   void OnNo(wxCommandEvent &WXUNUSED(evt))
+   {
+      EndModal(wxNO);
+   }
+
+   void OnGetURL(wxCommandEvent &WXUNUSED(evt))
+   {
+      HelpSystem::ShowHelp(this, wxT("File_Menu:_Compact_Project"), true);
+   }
+};
+}
+
+void ProjectFileManager::Compact()
+{
+   auto &project = mProject;
+   auto &undoManager = UndoManager::Get(project);
+   auto &clipboard = Clipboard::Get();
+   auto &projectFileIO = ProjectFileIO::Get(project);
+   bool isBatch = project.mBatchMode > 0;
+
+   // Purpose of this is to remove the -wal file.
+   projectFileIO.ReopenProject();
+
+   auto savedState = undoManager.GetSavedState();
+   const auto currentState = undoManager.GetCurrentState();
+   if (savedState < 0) {
+      undoManager.StateSaved();
+      savedState = undoManager.GetSavedState();
+      if (savedState < 0) {
+         wxASSERT(false);
+         savedState = 0;
+      }
+   }
+   const auto least = std::min<size_t>(savedState, currentState);
+   const auto greatest = std::max<size_t>(savedState, currentState);
+   std::vector<const TrackList*> trackLists;
+   auto fn = [&](auto& elem){
+      trackLists.push_back(elem.state.tracks.get()); };
+   undoManager.VisitStates(fn, least, 1 + least);
+   if (least != greatest)
+      undoManager.VisitStates(fn, greatest, 1 + greatest);
+
+   int64_t total = projectFileIO.GetTotalUsage();
+   int64_t used = projectFileIO.GetCurrentUsage(trackLists);
+
+   auto before = wxFileName::GetSize(projectFileIO.GetFileName());
+
+   CompactDialog dlg(
+         XO("Compacting this project will free up disk space by removing unused bytes within the file.\n\n"
+            "There is %s of free disk space and this project is currently using %s.\n"
+            "\n"
+            "If you proceed, the current Undo/Redo History and clipboard contents will be discarded "
+            "and you will recover approximately %s of disk space.\n"
+            "\n"
+            "Do you want to continue?")
+         .Format(Internat::FormatSize(projectFileIO.GetFreeDiskSpace()),
+                  Internat::FormatSize(before.GetValue()),
+                  Internat::FormatSize(total - used)));
+   if (isBatch || dlg.ShowModal() == wxYES)
+   {
+      // We can remove redo states, if they are after the saved state.
+      undoManager.RemoveStates(1 + greatest, undoManager.GetNumStates());
+
+      // We can remove all states between the current and the last saved.
+      if (least < greatest)
+         undoManager.RemoveStates(least + 1, greatest);
+
+      // We can remove all states before the current and the last saved.
+      undoManager.RemoveStates(0, least);
+
+      // And clear the clipboard, if needed
+      if (&mProject == clipboard.Project().lock().get())
+         clipboard.Clear();
+
+      // Refresh the before space usage since it may have changed due to the
+      // above actions.
+      auto before = wxFileName::GetSize(projectFileIO.GetFileName());
+
+      projectFileIO.Compact(trackLists, true);
+
+      auto after = wxFileName::GetSize(projectFileIO.GetFileName());
+
+      if (!isBatch)
+      {
+         AudacityMessageBox(
+            XO("Compacting actually freed %s of disk space.")
+            .Format(Internat::FormatSize((before - after).GetValue())),
+            XO("Compact Project"));
+      }
+
+      undoManager.RenameState( undoManager.GetCurrentState(),
+         XO("Compacted project file"),
+         XO("Compact") );
+   }
 }

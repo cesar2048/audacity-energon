@@ -33,58 +33,19 @@
 
 #include "../include/audacity/ComponentInterface.h"
 #include "MemoryX.h" // for wxArrayStringEx
+#include "widgets/FileConfig.h"
 
 #include <memory>
-#include <wx/fileconf.h>  // to inherit wxFileConfig
 #include <wx/event.h> // to declare custom event types
 
 class wxFileName;
 
-void InitPreferences( const wxFileName &configFileName );
-bool CheckWritablePreferences();
-TranslatableString UnwritablePreferencesErrorMessage( const wxFileName &configFileName );
+void InitPreferences( std::unique_ptr<FileConfig> uPrefs );
 void FinishPreferences();
 
-class AudacityPrefs;
-
-
-extern AUDACITY_DLL_API AudacityPrefs *gPrefs;
+extern AUDACITY_DLL_API FileConfig *gPrefs;
 extern int gMenusDirty;
 
-
-/// \brief Our own specialisation of wxFileConfig.  It is essentially a renaming,
-/// though it does provide one new access function.  Most of the prefs work
-/// is actually done by the InitPreferences() function.
-class  AUDACITY_DLL_API AudacityPrefs : public wxFileConfig 
-{
-public:
-   AudacityPrefs(const wxString& appName = {},
-               const wxString& vendorName = {},
-               const wxString& localFilename = {},
-               const wxString& globalFilename = {},
-               long style = wxCONFIG_USE_LOCAL_FILE | wxCONFIG_USE_GLOBAL_FILE,
-               const wxMBConv& conv = wxConvAuto());
-
-   // Set and Get values of the version major/minor/micro keys in audacity.cfg when Audacity first opens
-   void SetVersionKeysInit( int major, int minor, int micro)
-   {
-      mVersionMajorKeyInit = major;
-      mVersionMinorKeyInit = minor;
-      mVersionMicroKeyInit = micro;
-   }
-   void GetVersionKeysInit( int& major, int& minor, int& micro) const
-   {
-      major = mVersionMajorKeyInit;
-      minor = mVersionMinorKeyInit;
-      micro = mVersionMicroKeyInit;
-   }
-
-   // values of the version major/minor/micro keys in audacity.cfg
-   // when Audacity first opens
-   int mVersionMajorKeyInit{};
-   int mVersionMinorKeyInit{};
-   int mVersionMicroKeyInit{};
-};
 
 struct ByColumns_t{};
 extern ByColumns_t ByColumns;

@@ -209,6 +209,9 @@ class AUDACITY_DLL_API CommandManager final
    // Lyrics and MixerTrackCluster classes use it.
    bool FilterKeyEvent(AudacityProject *project, const wxKeyEvent & evt, bool permit = false);
    bool HandleMenuID(AudacityProject &project, int id, CommandFlag flags, bool alwaysEnabled);
+   void RegisterLastAnalyzer(const CommandContext& context);
+   void RegisterLastTool(const CommandContext& context);
+   void DoRepeatProcess(const CommandContext& context, int);
 
    enum TextualCommandResult {
       CommandFailure,
@@ -272,7 +275,7 @@ class AUDACITY_DLL_API CommandManager final
        // parenthesized, after the translated name.
        const ComponentInterfaceSymbol commands[], size_t nCommands) const;
 
-   // Sorted list of the shortcut keys to be exluded from the standard defaults
+   // Sorted list of the shortcut keys to be excluded from the standard defaults
    static const std::vector<NormalizedKeyString> &ExcludedList();
 
 private:
@@ -356,6 +359,8 @@ private:
    bool mbSeparatorAllowed; // false at the start of a menu and immediately after a separator.
 
    TranslatableString mCurrentMenuName;
+   TranslatableString mNiceName;
+   int mLastProcessId;
    std::unique_ptr<wxMenu> uCurrentMenu;
    wxMenu *mCurrentMenu {};
 

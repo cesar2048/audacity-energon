@@ -432,7 +432,8 @@ SelectHandle::SelectHandle
   const TrackList &trackList,
   const TrackPanelMouseState &st, const ViewInfo &viewInfo )
    : mpView{ pTrackView }
-   , mSnapManager{ std::make_shared<SnapManager>(&trackList, &viewInfo) }
+   , mSnapManager{ std::make_shared<SnapManager>(
+      *trackList.GetOwner(), trackList, viewInfo) }
 {
    const wxMouseState &state = st.state;
    mRect = st.rect;
@@ -441,7 +442,7 @@ SelectHandle::SelectHandle
    auto pTrack = pTrackView->FindTrack();
    mSnapStart = mSnapManager->Snap(pTrack.get(), time, false);
    if (mSnapStart.snappedPoint)
-      mSnapStart.outCoord += mRect.x;
+         mSnapStart.outCoord += mRect.x;
    else
       mSnapStart.outCoord = -1;
 
@@ -569,7 +570,8 @@ UIHandle::Result SelectHandle::Click
       // Special case: if we're over a clip in a WaveTrack,
       // select just that clip
       pTrack->TypeSwitch( [&] ( WaveTrack *wt ) {
-         WaveClip *const selectedClip = wt->GetClipAtX(event.m_x);
+         auto time = viewInfo.PositionToTime(event.m_x, mRect.x);
+         WaveClip *const selectedClip = wt->GetClipAtTime(time);
          if (selectedClip) {
             viewInfo.selectedRegion.setTimes(
                selectedClip->GetOffset(), selectedClip->GetEndTime());

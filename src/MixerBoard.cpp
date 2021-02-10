@@ -21,7 +21,6 @@
 
 #include <wx/bmpbuttn.h>
 #include <wx/dcclient.h>
-#include <wx/dcmemory.h>
 #include <wx/icon.h>
 #include <wx/settings.h> // for wxSystemSettings::GetColour and wxSystemSettings::GetMetric
 
@@ -1413,12 +1412,7 @@ MixerBoardFrame::MixerBoardFrame(AudacityProject* parent)
                               wxString::Format(wxT(" - %s"),
                                              parent->GetProjectName()))),
             wxDefaultPosition, kDefaultSize,
-            //vvv Bug in wxFRAME_FLOAT_ON_PARENT:
-            // If both the project frame and MixerBoardFrame are minimized and you restore MixerBoardFrame,
-            // you can't restore project frame until you close MixerBoardFrame, but then project frame and
-            // MixerBoardFrame are restored but MixerBoardFrame is unresponsive because it thinks it's not shown.
-            //    wxDEFAULT_FRAME_STYLE | wxFRAME_FLOAT_ON_PARENT)
-            wxDEFAULT_FRAME_STYLE)
+            wxDEFAULT_FRAME_STYLE | wxFRAME_FLOAT_ON_PARENT)
 {
    mMixerBoard = safenew MixerBoard(parent, this, wxDefaultPosition, kDefaultSize);
 

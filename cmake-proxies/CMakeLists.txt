@@ -18,7 +18,7 @@ cmd_option( ${_OPT}lib_preference
 #     symbol   suffix for the "USE_<symbol>" variable that the Audacity
 #              target uses to include/exclude functionality.
 #
-#     requried Determines if the library is required or not.  If it is,
+#     required Determines if the library is required or not.  If it is,
 #              the user is not given the option of enabling/disabling it.
 #
 #     check    Determines if local/system checks should be performed here
@@ -150,7 +150,7 @@ addlib( lv2                lv2         LV2         NO    YES   "lilv-0 >= 0.24.6
 addlib( portmidi           midi        MIDI        NO    YES   "portmidi >= 0.1" )
 addlib( portmixer          portmixer   PORTMIXER   NO    YES   "" )
 addlib( portsmf            portsmf     PORTSMF     NO    YES   "portSMF >= 0.1" )
-addlib( sbsms              sbsms       SBSMS       NO    YES   "" )
+addlib( libsbsms           sbsms       SBSMS       NO    YES   "sbsms >= 2.2.0" )
 addlib( soundtouch         soundtouch  SOUNDTOUCH  NO    YES   "soundtouch >= 1.7.1" )
 addlib( twolame            twolame     LIBTWOLAME  NO    YES   "twolame >= 0.3.13" )
 

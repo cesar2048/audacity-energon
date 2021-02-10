@@ -155,6 +155,17 @@ public:
    int FindNextLabel(const SelectedRegion& currentSelection);
    int FindPrevLabel(const SelectedRegion& currentSelection);
 
+   Track::Holder PasteInto( AudacityProject & ) const override;
+
+   struct IntervalData final : Track::IntervalData {
+      size_t index;
+      explicit IntervalData(size_t index) : index{index} {};
+   };
+   ConstInterval MakeInterval ( size_t index ) const;
+   Interval MakeInterval ( size_t index );
+   ConstIntervals GetIntervals() const override;
+   Intervals GetIntervals() override;
+
  public:
    void SortLabels();
 

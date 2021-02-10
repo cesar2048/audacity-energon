@@ -11,7 +11,6 @@
 #include "../AudioIOBase.h"
 #include "../CommonCommandFlags.h"
 #include "../CrashReport.h"
-#include "../Dependencies.h"
 #include "../FileNames.h"
 #include "../HelpText.h"
 #include "../Menus.h"
@@ -21,7 +20,6 @@
 #include "../ShuttleGui.h"
 #include "../SplashDialog.h"
 #include "../Theme.h"
-#include "../toolbars/ToolManager.h"
 #include "../commands/CommandContext.h"
 #include "../commands/CommandManager.h"
 #include "../prefs/PrefsDialog.h"
@@ -52,7 +50,8 @@ void ShowDiagnostics(
          .Style(wxTE_MULTILINE | wxTE_READONLY | wxTE_RICH)
          .AddTextWindow("");
 
-      S.AddStandardButtons(eOkButton | eCancelButton);
+      wxButton *save = safenew wxButton(S.GetParent(), wxID_OK, _("&Save"));
+      S.AddStandardButtons(eCancelButton, save);
    }
    S.EndVerticalLay();
 
@@ -64,7 +63,6 @@ void ShowDiagnostics(
 
    *text << info;
 
-   dlg.FindWindowById(wxID_OK)->SetLabel(_("&Save"));
    dlg.SetSize(350, 450);
 
    if (dlg.ShowModal() == wxID_OK)
@@ -95,7 +93,7 @@ void ShowDiagnostics(
  * This class originated with the 'Stuck in a mode' problem, where far too many
  * users get into a mode without realising, and don't know how to get out.
  * It is a band-aid, and we should do more towards a full and proper solution
- * where there are fewer special modes, and they don't persisit.
+ * where there are fewer special modes, and they don't persist.
  */
 class QuickFixDialog : public wxDialogWrapper
 {

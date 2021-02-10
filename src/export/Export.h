@@ -139,7 +139,7 @@ protected:
          double startTime, double stopTime,
          unsigned numOutChannels, size_t outBufferSize, bool outInterleaved,
          double outRate, sampleFormat outFormat,
-         bool highQuality = true, MixerSpec *mixerSpec = NULL);
+         MixerSpec *mixerSpec);
 
    // Create or recycle a dialog.
    static void InitProgress(std::unique_ptr<ProgressDialog> &pDialog,
@@ -321,4 +321,17 @@ private:
 private:
    DECLARE_EVENT_TABLE()
 };
+
+TranslatableString AudacityExportCaptionStr();
+TranslatableString AudacityExportMessageStr();
+
+/// We have many Export errors that are essentially anonymous
+/// and are distinguished only by an error code number.
+/// Rather than repeat the code, we have it just once.
+void ShowExportErrorDialog(wxString ErrorCode,
+   TranslatableString message = AudacityExportMessageStr(),
+   const TranslatableString& caption = AudacityExportCaptionStr());
+
+void ShowDiskFullExportErrorDialog(const wxFileNameWrapper &fileName);
+
 #endif

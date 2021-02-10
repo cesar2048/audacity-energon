@@ -54,7 +54,7 @@ but little else.
 class AudacityProject;
 class ProgressDialog;
 enum class ProgressResult : unsigned;
-class TrackFactory;
+class WaveTrackFactory;
 class Track;
 class Tags;
 
@@ -133,14 +133,14 @@ public:
    virtual ByteCount GetFileUncompressedBytes() = 0;
 
    // do the actual import, creating whatever tracks are necessary with
-   // the TrackFactory and calling the progress callback every iteration
+   // the WaveTrackFactory and calling the progress callback every iteration
    // through the importing loop
    // The given Tags structure may also be modified.
    // In case of errors or exceptions, it is not necessary to leave outTracks
    // or tags unmodified.
    // If resulting outTracks is not empty,
    // then each member of it must be a nonempty vector.
-   virtual ProgressResult Import(TrackFactory *trackFactory, TrackHolders &outTracks,
+   virtual ProgressResult Import(WaveTrackFactory *trackFactory, TrackHolders &outTracks,
                       Tags *tags) = 0;
 
    // Return number of elements in stream list
@@ -151,6 +151,13 @@ public:
 
    // Set stream "import/don't import" flag
    virtual void SetStreamUsage(wxInt32 StreamID, bool Use) = 0;
+
+   //! Choose appropriate format, which will not be narrower than the specified one
+   static sampleFormat ChooseFormat(sampleFormat effectiveFormat);
+
+   //! Build a wave track with appropriate format, which will not be narrower than the specified one
+   std::shared_ptr<WaveTrack> NewWaveTrack( WaveTrackFactory &trackFactory,
+      sampleFormat effectiveFormat, double rate);
 
 protected:
    FilePath mFilename;

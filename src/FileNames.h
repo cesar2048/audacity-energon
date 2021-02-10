@@ -16,6 +16,7 @@
 #include <wx/dir.h> // for wxDIR_FILES
 #include <wx/string.h> // function return value
 #include "audacity/Types.h"
+#include "Prefs.h"
 #include "MemoryX.h"
 
 class wxFileName;
@@ -64,11 +65,6 @@ namespace FileNames
    bool HardLinkFile( const FilePath& file1, const FilePath& file2);
 
    wxString MkDir(const wxString &Str);
-   wxString TempDir();
-
-   const FilePath &DefaultTempDir();
-   void SetDefaultTempDir( const FilePath &tempDir );
-   bool IsTempDirectoryNameOK( const FilePath & Name );
 
    bool IsMidi(const FilePath &fName);
 
@@ -133,27 +129,44 @@ namespace FileNames
    enum class Operation {
       // _ on None to defeat some macro that is expanding this.
       _None,
+
+      // These do not have a specific pathtype
+      Temp,
+      Presets,
+
+      // These have default/lastused pathtypes
       Open,
+      Save,
+      Import,
       Export
    };
 
-   wxString FindDefaultPath(Operation op);
+   enum class PathType {
+      // _ on None to defeat some macro that is expanding this.
+      _None,
+      User,
+      LastUsed
+   };
+
+   wxString PreferenceKey(FileNames::Operation op, FileNames::PathType type);
+
+   FilePath FindDefaultPath(Operation op);
    void UpdateDefaultPath(Operation op, const FilePath &path);
 
    // F is a function taking a wxString, returning wxString
    template<typename F>
-   wxString WithDefaultPath
+   FilePath WithDefaultPath
    (Operation op, const FilePath &defaultPath, F function)
    {
-      auto path = defaultPath;
+      auto path = gPrefs->Read(PreferenceKey(op, PathType::User), defaultPath);
       if (path.empty())
          path = FileNames::FindDefaultPath(op);
       auto result = function(path);
-      FileNames::UpdateDefaultPath(op, result);
+      FileNames::UpdateDefaultPath(op, ::wxPathOnly(result));
       return result;
    }
 
-   wxString
+   FilePath
    SelectFile(Operation op,   // op matters only when default_path is empty
       const TranslatableString& message,
       const FilePath& default_path,
@@ -186,12 +199,15 @@ namespace FileNames
    wxString CreateUniqueName(const wxString &prefix,
                              const wxString &suffix = wxEmptyString);
 
-   // Create a filename for an unsaved/temporary project file
-   wxString UnsavedProjectFileName();
-
    // File extension used for unsaved/temporary project files
    wxString UnsavedProjectExtension();
 
+   AUDACITY_DLL_API
+   bool IsOnFATFileSystem(const FilePath &path);
+
+   AUDACITY_DLL_API
+   //! Give enough of the path to identify the device.  (On Windows, drive letter plus ':')
+   wxString AbbreviatePath(const wxFileName &fileName);
 };
 
 // Use this macro to wrap all filenames and pathnames that get

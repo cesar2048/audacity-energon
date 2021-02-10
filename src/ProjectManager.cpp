@@ -82,6 +82,8 @@ ProjectManager::ProjectManager( AudacityProject &project )
    window.Bind( wxEVT_CLOSE_WINDOW, &ProjectManager::OnCloseWindow, this );
    mProject.Bind(EVT_PROJECT_STATUS_UPDATE,
       &ProjectManager::OnStatusChange, this);
+   project.Bind( EVT_RECONNECTION_FAILURE,
+      &ProjectManager::OnReconnectionFailure, this );
 }
 
 ProjectManager::~ProjectManager() = default;
@@ -535,10 +537,9 @@ AudacityProject *ProjectManager::New()
    auto &window = ProjectWindow::Get( *p );
    InitProjectWindow( window );
 
-   auto &projectFileIO = ProjectFileIO::Get( *p );
-   projectFileIO.Init( *p );
-   projectFileIO.SetProjectTitle();
-   
+   auto &projectFileManager = ProjectFileManager::Get( *p );
+   projectFileManager.OpenProject();
+
    MenuManager::Get( project ).CreateMenusAndCommands( project );
    
    projectHistory.InitialState();
@@ -588,6 +589,14 @@ AudacityProject *ProjectManager::New()
    window.Show(true);
    
    return p;
+}
+
+void ProjectManager::OnReconnectionFailure(wxCommandEvent & event)
+{
+   event.Skip();
+   wxTheApp->CallAfter([this]{
+      ProjectWindow::Get(mProject).Close(true);
+   });
 }
 
 void ProjectManager::OnCloseWindow(wxCloseEvent & event)
@@ -733,16 +742,14 @@ void ProjectManager::OnCloseWindow(wxCloseEvent & event)
    // TODO: Is there a Mac issue here??
    // SetMenuBar(NULL);
 
-   // Vacuum the project.
-   projectFileManager.VacuumProject();
+   // Compact the project.
+   projectFileManager.CompactProjectOnClose();
 
    // Set (or not) the bypass flag to indicate that deletes that would happen during
    // the UndoManager::ClearStates() below are not necessary.
    projectFileIO.SetBypass();
 
    {
-      AutoCommitTransaction trans(projectFileIO, "Shutdown");
-
       // This can reduce reference counts of sample blocks in the project's
       // tracks.
       UndoManager::Get( project ).ClearStates();
@@ -750,9 +757,6 @@ void ProjectManager::OnCloseWindow(wxCloseEvent & event)
       // Delete all the tracks to free up memory
       tracks.Clear();
    }
-
-   // We're all done with the project file, so close it now
-   projectFileManager.CloseProject();
 
    // Some of the AdornedRulerPanel functions refer to the TrackPanel, so destroy this
    // before the TrackPanel is destroyed. This change was needed to stop Audacity
@@ -764,14 +768,18 @@ void ProjectManager::OnCloseWindow(wxCloseEvent & event)
    // Check validity of mTrackPanel per bug 584 Comment 1.
    // Deeper fix is in the Import code, but this failsafes against crash.
    TrackPanel::Destroy( project );
-
    // Finalize the tool manager before the children since it needs
    // to save the state of the toolbars.
    ToolManager::Get( project ).Destroy();
 
    window.DestroyChildren();
 
-   TrackFactory::Destroy( project );
+   // Close project only now, because TrackPanel might have been holding
+   // some shared_ptr to WaveTracks keeping SampleBlocks alive.
+   // We're all done with the project file, so close it now
+   projectFileManager.CloseProject();
+
+   WaveTrackFactory::Destroy( project );
 
    // Remove self from the global array, but defer destruction of self
    auto pSelf = AllProjects{}.Remove( project );
@@ -841,7 +849,7 @@ void ProjectManager::OnOpenAudioFile(wxCommandEvent & event)
 void ProjectManager::OpenFiles(AudacityProject *proj)
 {
    auto selectedFiles =
-      ProjectFileManager::ShowOpenDialog();
+      ProjectFileManager::ShowOpenDialog(FileNames::Operation::Open);
    if (selectedFiles.size() == 0) {
       Importer::SetLastOpenType({});
       return;
@@ -860,8 +868,6 @@ void ProjectManager::OpenFiles(AudacityProject *proj)
       // Make sure it isn't already open.
       if (ProjectFileManager::IsAlreadyOpen(fileName))
          continue; // Skip ones that are already open.
-
-      FileNames::UpdateDefaultPath(FileNames::Operation::Open, fileName);
 
       // DMM: If the project is dirty, that means it's been touched at
       // all, and it's not safe to open a NEW project directly in its
@@ -904,7 +910,7 @@ AudacityProject *ProjectManager::OpenProject(
       window.Zoom( window.GetZoomOfToFit() );
       // "Project was recovered" replaces "Create new project" in Undo History.
       auto &undoManager = UndoManager::Get( *pProject );
-      undoManager.RemoveStates(1);
+      undoManager.RemoveStates(0, 1);
    }
 
    return pProject;
@@ -921,13 +927,14 @@ void ProjectManager::ResetProjectToEmpty() {
    SelectUtilities::DoSelectAll( project );
    TrackUtilities::DoRemoveTracks( project );
 
-   TrackFactory::Reset( project );
-
-   projectFileManager.Reset();
+   WaveTrackFactory::Reset( project );
 
    projectHistory.SetDirty( false );
    auto &undoManager = UndoManager::Get( project );
    undoManager.ClearStates();
+
+   projectFileManager.CloseProject();
+   projectFileManager.OpenProject();
 }
 
 void ProjectManager::RestartTimer()

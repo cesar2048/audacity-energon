@@ -185,6 +185,11 @@ public:
          mVisibleChannels = CHANNEL_BIT(c);
    }
 
+   Track::Holder PasteInto( AudacityProject & ) const override;
+
+   ConstIntervals GetIntervals() const override;
+   Intervals GetIntervals() override;
+
  private:
 
    TrackKind GetKind() const override { return TrackKind::Note; }

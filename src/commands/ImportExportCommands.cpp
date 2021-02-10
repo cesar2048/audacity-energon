@@ -21,8 +21,10 @@
 #include "../ProjectFileManager.h"
 #include "../ViewInfo.h"
 #include "../export/Export.h"
+#include "../SelectUtilities.h"
 #include "../Shuttle.h"
 #include "../ShuttleGui.h"
+#include "../Track.h"
 #include "../wxFileNameWrapper.h"
 #include "CommandContext.h"
 
@@ -47,14 +49,24 @@ void ImportCommand::PopulateOrExchange(ShuttleGui & S)
    S.EndMultiColumn();
 }
 
-bool ImportCommand::Apply(const CommandContext & context){
-   return ProjectFileManager::Get( context.project ).Import(mFileName);
+bool ImportCommand::Apply(const CommandContext & context)
+{
+   bool wasEmpty = TrackList::Get( context.project ).Any().empty();
+   bool success = ProjectFileManager::Get( context.project )
+      .Import(mFileName, false);
+
+   if (success && wasEmpty)
+   {
+      SelectUtilities::SelectAllIfNone( context.project );
+   }
+
+   return success;
 }
 
 
 
 bool ExportCommand::DefineParams( ShuttleParams & S ){
-   wxFileName fn = FileNames::DefaultToDocumentsFolder(wxT("/Export/Path"));
+   wxFileName fn = FileNames::FindDefaultPath(FileNames::Operation::Export);
    fn.SetName("exported.wav");
    S.Define(mFileName, wxT("Filename"), fn.GetFullPath());
    S.Define( mnChannels, wxT("NumChannels"),  1 );

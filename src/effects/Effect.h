@@ -50,7 +50,7 @@ class SelectedRegion;
 class EffectUIHost;
 class Track;
 class TrackList;
-class TrackFactory;
+class WaveTrackFactory;
 class WaveTrack;
 
 /* i18n-hint: "Nyquist" is an embedded interpreted programming language in
@@ -244,6 +244,8 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
    // Fully qualified local help file name
    virtual wxString HelpPage();
 
+   virtual void SetUIFlags(unsigned flags);
+   virtual unsigned TestUIFlags(unsigned mask);
    virtual bool IsBatchProcessing();
    virtual void SetBatchProcessing(bool start);
 
@@ -257,7 +259,7 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
    // Audacity's standard UI.
    // Create a user interface only if the supplied function is not null.
    /* not virtual */ bool DoEffect( double projectRate, TrackList *list,
-      TrackFactory *factory, NotifyingSelectedRegion &selectedRegion,
+      WaveTrackFactory *factory, NotifyingSelectedRegion &selectedRegion,
       // Prompt the user for input only if these arguments are both not null.
       wxWindow *pParent = nullptr,
       const EffectDialogFactory &dialogFactory = {} );
@@ -458,7 +460,7 @@ protected:
                                // be created with this rate...
    double         mSampleRate;
    wxWeakRef<NotifyingSelectedRegion> mpSelectedRegion{};
-   TrackFactory   *mFactory;
+   WaveTrackFactory   *mFactory;
    const TrackList *inputTracks() const { return mTracks; }
    const AudacityProject *FindProject() const;
    std::shared_ptr<TrackList> mOutputTracks; // used only if CopyInputTracks() is called.
@@ -476,6 +478,7 @@ protected:
    wxDialog       *mUIDialog;
    wxWindow       *mUIParent;
    int            mUIResultID;
+   unsigned       mUIFlags;
 
    sampleCount    mSampleCnt;
 

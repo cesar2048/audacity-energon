@@ -48,22 +48,6 @@
 #include <vector>
 #include <wx/debug.h> // for wxASSERT
 #include <wx/string.h> // type used in inline function and member variable
-#include <wx/version.h> // for wxCHECK_VERSION
-
-#if !wxCHECK_VERSION(3, 1, 0)
-// For using std::unordered_map on wxString
-namespace std
-{
-   template<> struct hash< wxString > {
-      size_t operator () (const wxString &str) const // noexcept
-      {
-         auto stdstr = str.ToStdWstring(); // no allocations, a cheap fetch
-         using Hasher = hash< decltype(stdstr) >;
-         return Hasher{}( stdstr );
-      }
-   };
-}
-#endif
 
 // ----------------------------------------------------------------------------
 // TODO:  I'd imagine this header may be replaced by other public headers. But,
@@ -210,7 +194,7 @@ public:
 // to one of the operators on Identifiers defined above, but always case
 // sensitive.
 
-// Comparison operators for two TaggedIdentifers, below, require the same tags
+// Comparison operators for two TaggedIdentifiers, below, require the same tags
 // and case sensitivity.
 template< typename Tag1, typename Tag2, bool b1, bool b2 >
 inline bool operator == (
@@ -723,9 +707,15 @@ inline size_t limitSampleBufferSize( size_t bufferSize, sampleCount limit )
 // ----------------------------------------------------------------------------
 enum sampleFormat : unsigned
 {
+   //! The increasing sequence of these enum values must correspond to the increasing data type width
+   //! These values persist in saved project files, so must not be changed in later program versions
    int16Sample = 0x00020001,
    int24Sample = 0x00040001,
-   floatSample = 0x0004000F
+   floatSample = 0x0004000F,
+
+   //! Two synonyms for previous values that might change if more values were added
+   narrowestSampleFormat = int16Sample,
+   widestSampleFormat = floatSample,
 };
 
 // ----------------------------------------------------------------------------

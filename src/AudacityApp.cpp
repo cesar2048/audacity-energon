@@ -71,6 +71,7 @@ It handles initialization and termination by subclassing wxApp.
 #include "AudacityLogger.h"
 #include "AboutDialog.h"
 #include "AColor.h"
+#include "AudacityFileConfig.h"
 #include "AudioIO.h"
 #include "Benchmark.h"
 #include "Clipboard.h"
@@ -94,11 +95,11 @@ It handles initialization and termination by subclassing wxApp.
 #include "ProjectWindow.h"
 #include "Screenshot.h"
 #include "Sequence.h"
-#include "WaveTrack.h"
+#include "TempDirectory.h"
+#include "Track.h"
 #include "prefs/PrefsDialog.h"
 #include "Theme.h"
 #include "PlatformCompatibility.h"
-#include "FileNames.h"
 #include "AutoRecoveryDialog.h"
 #include "SplashDialog.h"
 #include "FFT.h"
@@ -106,6 +107,7 @@ It handles initialization and termination by subclassing wxApp.
 #include "prefs/DirectoriesPrefs.h"
 #include "prefs/GUIPrefs.h"
 #include "tracks/ui/Scrubbing.h"
+#include "widgets/FileConfig.h"
 #include "widgets/FileHistory.h"
 
 #ifdef EXPERIMENTAL_EASY_CHANGE_KEY_BINDINGS
@@ -146,6 +148,8 @@ It handles initialization and termination by subclassing wxApp.
 #include "../images/AudacityLogoWithName.xpm"
 #endif
 
+#include <thread>
+
 
 ////////////////////////////////////////////////////////////
 /// Custom events
@@ -185,11 +189,10 @@ void PopulatePreferences()
    {
       const wxString fullPath{fn.GetFullPath()};
 
-      wxFileConfig ini(wxEmptyString,
-                       wxEmptyString,
-                       fullPath,
-                       wxEmptyString,
-                       wxCONFIG_USE_LOCAL_FILE);
+      auto pIni =
+         AudacityFileConfig::Create({}, {}, fullPath, {},
+            wxCONFIG_USE_LOCAL_FILE);
+      auto &ini = *pIni;
 
       wxString lang;
       if (ini.Read(wxT("/FromInno/Language"), &lang))
@@ -800,7 +803,7 @@ bool AudacityApp::MRUOpen(const FilePath &fullPathStr) {
       // verify that the file exists
       if (wxFile::Exists(fullPathStr))
       {
-         FileNames::UpdateDefaultPath(FileNames::Operation::Open, fullPathStr);
+         FileNames::UpdateDefaultPath(FileNames::Operation::Open, ::wxPathOnly(fullPathStr));
 
          // Make sure it isn't already open.
          // Test here even though AudacityProject::OpenFile() also now checks, because
@@ -1120,11 +1123,11 @@ bool AudacityApp::OnInit()
    if (!envTempDir.empty()) {
       /* On Unix systems, the environment variable TMPDIR may point to
          an unusual path when /tmp and /var/tmp are not desirable. */
-      FileNames::SetDefaultTempDir( wxString::Format(
+      TempDirectory::SetDefaultTempDir( wxString::Format(
          wxT("%s/audacity-%s"), envTempDir, wxGetUserId() ) );
    } else {
       /* On Unix systems, the default temp dir is in /var/tmp. */
-      FileNames::SetDefaultTempDir( wxString::Format(
+      TempDirectory::SetDefaultTempDir( wxString::Format(
          wxT("/var/tmp/audacity-%s"), wxGetUserId() ) );
    }
 
@@ -1197,7 +1200,7 @@ bool AudacityApp::OnInit()
 
    // See bug #1271 for explanation of location
    tmpDirLoc = FileNames::MkDir(wxStandardPaths::Get().GetUserLocalDataDir());
-   FileNames::SetDefaultTempDir( wxString::Format(
+   TempDirectory::SetDefaultTempDir( wxString::Format(
       wxT("%s\\SessionData"), tmpDirLoc ) );
 #endif //__WXWSW__
 
@@ -1218,10 +1221,10 @@ bool AudacityApp::OnInit()
 
    // JKC Bug 1220: Using an actual temp directory for session data on Mac was
    // wrong because it would get cleared out on a reboot.
-   FileNames::SetDefaultTempDir( wxString::Format(
+   TempDirectory::SetDefaultTempDir( wxString::Format(
       wxT("%s/Library/Application Support/audacity/SessionData"), tmpDirLoc) );
 
-   //FileNames::SetDefaultTempDir( wxString::Format(
+   //TempDirectory::SetDefaultTempDir( wxString::Format(
    //   wxT("%s/audacity-%s"),
    //   tmpDirLoc,
    //   wxGetUserId() ) );
@@ -1229,7 +1232,7 @@ bool AudacityApp::OnInit()
 
    FileNames::SetAudacityPathList( std::move( audacityPathList ) );
 
-   // Define languanges for which we have translations, but that are not yet
+   // Define languages for which we have translations, but that are not yet
    // supported by wxWidgets.
    //
    // TODO:  The whole Language initialization really need to be reworked.
@@ -1242,16 +1245,14 @@ bool AudacityApp::OnInit()
 #endif
 
    // Initialize preferences and language
-   wxFileName configFileName(FileNames::DataDir(), wxT("audacity.cfg"));
-   InitPreferences( configFileName );
-   PopulatePreferences();
-   // This test must follow PopulatePreferences, because if an error message
-   // must be shown, we need internationalization to have been initialized
-   // first, which was done in PopulatePreferences
-   if ( !CheckWritablePreferences() ) {
-      ::AudacityMessageBox(
-         UnwritablePreferencesErrorMessage( configFileName ) );
-      return false;
+   {
+      wxFileName configFileName(FileNames::DataDir(), wxT("audacity.cfg"));
+      auto appName = wxTheApp->GetAppName();
+      InitPreferences( AudacityFileConfig::Create(
+         appName, wxEmptyString,
+         configFileName.GetFullPath(),
+         wxEmptyString, wxCONFIG_USE_LOCAL_FILE) );
+      PopulatePreferences();
    }
 
 #if defined(__WXMSW__) && !defined(__WXUNIVERSAL__) && !defined(__CYGWIN__)
@@ -1267,6 +1268,48 @@ bool AudacityApp::OnInit()
    if (!InitTempDir()) {
       FinishPreferences();
       return false;
+   }
+
+#ifdef __WXMAC__
+   // Bug2437:  When files are opened from Finder and another instance of
+   // Audacity is running, we must return from OnInit() to wxWidgets before
+   // MacOpenFile is called, informing us of the paths that need to be
+   // opened.  So use CallAfter() to delay the rest of initialization.
+   // See CreateSingleInstanceChecker() where we send those paths over a
+   // socket to the prior instance.
+
+   // This call is what probably makes the sleep unnecessary:
+   MacFinishLaunching();
+
+   using namespace std::chrono;
+   // This sleep may be unnecessary, but it is harmless.  It less NS framework
+   // events arrive on another thread, but it might not always be long enough.
+   std::this_thread::sleep_for(100ms);
+   CallAfter([this]{
+      if (!InitPart2())
+         exit(-1);
+   });
+   return true;
+#else
+   return InitPart2();
+#endif
+}
+
+bool AudacityApp::InitPart2()
+{
+#if defined(__WXMAC__)
+   SetExitOnFrameDelete(false);
+#endif
+
+   // Make sure the temp dir isn't locked by another process.
+   {
+      auto key =
+         PreferenceKey(FileNames::Operation::Temp, FileNames::PathType::_None);
+      auto temp = gPrefs->Read(key);
+      if (temp.empty() || !CreateSingleInstanceChecker(temp)) {
+         FinishPreferences();
+         return false;
+      }
    }
 
    //<<<< Try to avoid dialogs before this point.
@@ -1388,8 +1431,6 @@ bool AudacityApp::OnInit()
 
       auto &recentFiles = FileHistory::Global();
       recentFiles.UseMenu(recentMenu);
-
-      SetExitOnFrameDelete(false);
 
 #endif //__WXMAC__
       temporarywindow.Show(false);
@@ -1574,9 +1615,8 @@ void SetToExtantDirectory( wxString & result, const wxString & dir ){
 bool AudacityApp::InitTempDir()
 {
    // We need to find a temp directory location.
-
-   wxString tempFromPrefs = gPrefs->Read(wxT("/Directories/TempDir"), wxT(""));
-   auto tempDefaultLoc = FileNames::DefaultTempDir();
+   auto tempFromPrefs = TempDirectory::TempDir();
+   auto tempDefaultLoc = TempDirectory::DefaultTempDir();
 
    wxString temp;
 
@@ -1590,7 +1630,7 @@ bool AudacityApp::InitTempDir()
    wxLogNull logNo;
 
    // Try temp dir that was stored in prefs first
-   if( FileNames::IsTempDirectoryNameOK( tempFromPrefs ) )
+   if( TempDirectory::IsTempDirectoryNameOK( tempFromPrefs ) )
       SetToExtantDirectory( temp, tempFromPrefs );
 
    // If that didn't work, try the default location
@@ -1613,7 +1653,7 @@ bool AudacityApp::InitTempDir()
 
    if (temp.empty()) {
       // Failed
-      if( !FileNames::IsTempDirectoryNameOK( tempFromPrefs ) ) {
+      if( !TempDirectory::IsTempDirectoryNameOK( tempFromPrefs ) ) {
          AudacityMessageBox(XO(
 "Audacity could not find a safe place to store temporary files.\nAudacity needs a place where automatic cleanup programs won't delete the temporary files.\nPlease enter an appropriate directory in the preferences dialog."));
       } else {
@@ -1638,13 +1678,10 @@ bool AudacityApp::InitTempDir()
    chmod(OSFILENAME(temp), 0755);
    #endif
 
-   bool bSuccess = gPrefs->Write(wxT("/Directories/TempDir"), temp) && gPrefs->Flush();
+   TempDirectory::ResetTempDir();
+   FileNames::UpdateDefaultPath(FileNames::Operation::Temp, temp);
 
-   // Make sure the temp dir isn't locked by another process.
-   if (!CreateSingleInstanceChecker(temp))
-      return false;
-
-   return bSuccess;
+   return true;
 }
 
 #if defined(__WXMSW__)
@@ -1760,32 +1797,140 @@ bool AudacityApp::CreateSingleInstanceChecker(const wxString &dir)
 
 #if defined(__UNIX__)
 
+#include <sys/ipc.h>
+#include <sys/sem.h>
+#include <sys/shm.h>
+
 // Return true if there are no other instances of Audacity running,
 // false otherwise.
-//
-// Use "dir" for creating lockfiles (on OS X and Unix).
 
 bool AudacityApp::CreateSingleInstanceChecker(const wxString &dir)
 {
-   wxUNIXaddress addr;
-   addr.Filename(dir + wxT("/.audacity.sock"));
-
    mIPCServ.reset();
 
-   // Try twice to either become the server or make a connection to one.  If
-   // both attempts fail, then there's something wrong that we can't deal with,
-   // like insufficient access to create the socket, no memory, etc.
-   for (int attempts = 0; attempts < 2; ++attempts)
+   bool isServer = false;
+   wxIPV4address addr;
+   addr.LocalHost();
+
+   struct sembuf op = {};
+
+   // Generate the IPC key we'll use for both shared memory and semaphores.
+   wxString datadir = FileNames::DataDir();
+   key_t memkey = ftok(datadir.c_str(), 0);
+   key_t servkey = ftok(datadir.c_str(), 1);
+   key_t lockkey = ftok(datadir.c_str(), 2);
+
+   // Create and map the shared memory segment where the port number
+   // will be stored.
+   int memid = shmget(memkey, sizeof(int), IPC_CREAT | S_IRUSR | S_IWUSR);
+   int *portnum = (int *) shmat(memid, nullptr, 0);
+
+   // Create (or return) the SERVER semaphore ID
+   int servid = semget(servkey, 1, IPC_CREAT | S_IRUSR | S_IWUSR);
+
+   // Create the LOCK semaphore only if it doesn't already exist.
+   int lockid = semget(lockkey, 1, IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+
+   // If the LOCK semaphore was successfully created, then this is the first
+   // time Audacity has been run during this boot of the system. In this
+   // case we know we'll become the "server" application, so set up the
+   // semaphores to prepare for it.
+   if (lockid != -1)
    {
-      // Make sure only the current user has access to the socket after
-      // it's created.
-      wxUmaskChanger mask(077);
+      // Initialize value of each semaphore, 1 indicates released and 0
+      // indicates acquired.
+      //
+      // Note that this action is NOT recorded in the semaphore's
+      // UNDO buffer.
+      semctl(servid, 0, SETVAL, 1);
+      semctl(lockid, 0, SETVAL, 1);
+
+      // Now acquire them so the semaphores will be set to the
+      // released state when the process terminates.
+      op.sem_num = 0;
+      op.sem_op = -1;
+      op.sem_flg = SEM_UNDO;
+      if (semop(lockid, &op, 1) == -1 || semop(servid, &op, 1) == -1)
+      {
+         AudacityMessageBox(
+            XO("Unable to acquire semaphores.\n\n"
+               "This is likely due to a resource shortage\n"
+               "and a reboot may be required."),
+            XO("Audacity Startup Failure"),
+            wxOK | wxICON_ERROR);
+
+         return false;
+      }
+
+      // We will be the server...
+      isServer = true;
+   }
+   // Something catastrophic must have happened, so bail.
+   else if (errno != EEXIST)
+   {
+      AudacityMessageBox(
+         XO("Unable to create semaphores.\n\n"
+            "This is likely due to a resource shortage\n"
+            "and a reboot may be required."),
+         XO("Audacity Startup Failure"),
+         wxOK | wxICON_ERROR);
+
+      return false;
+   }
+   // Otherwise it's a normal startup and we need to determine whether
+   // we'll be the server or the client.
+   else
+   {
+      // Retrieve the LOCK semaphore since we wouldn't have gotten it above.
+      lockid = semget(lockkey, 1, 0);
+
+      // Acquire the LOCK semaphore. We may block here if another
+      // process is currently setting up the server.
+      op.sem_num = 0;
+      op.sem_op = -1;
+      op.sem_flg = SEM_UNDO;
+      if (semop(lockid, &op, 1) == -1)
+      {
+         AudacityMessageBox(
+            XO("Unable to acquire lock semaphore.\n\n"
+               "This is likely due to a resource shortage\n"
+               "and a reboot may be required."),
+            XO("Audacity Startup Failure"),
+            wxOK | wxICON_ERROR);
+
+         return false;
+      }
+
+      // Try to acquire the SERVER semaphore. If it's not currently active, then
+      // we will become the server. Otherwise, this will fail and we'll know that
+      // the server is already active and we will become the client.
+      op.sem_num = 0;
+      op.sem_op = -1;
+      op.sem_flg = IPC_NOWAIT | SEM_UNDO;
+      if (semop(servid, &op, 1) == 0)
+      {
+         isServer = true;
+      }
+      else if (errno != EAGAIN)
+      {
+         AudacityMessageBox(
+            XO("Unable to acquire server semaphore.\n\n"
+               "This is likely due to a resource shortage\n"
+               "and a reboot may be required."),
+            XO("Audacity Startup Failure"),
+            wxOK | wxICON_ERROR);
+
+         return false;
+      }
+   }
+
+   // Initialize the socket server if we're to be the server.
+   if (isServer)
+   {
+      // The system will randomly assign a port
+      addr.Service(0);
 
       // Create the socket and bind to it.
-      //
-      // Here is where the actual socket inode is created.  If it
-      // already exists and is currently bound or abandoned, this will
-      // fail. Otherwise, we have become the server.
       auto serv = std::make_unique<wxSocketServer>(addr, wxSOCKET_NOWAIT);
       if (serv && serv->IsOk())
       {
@@ -1793,103 +1938,118 @@ bool AudacityApp::CreateSingleInstanceChecker(const wxString &dir)
          serv->SetNotify(wxSOCKET_CONNECTION_FLAG);
          serv->Notify(true);
          mIPCServ = std::move(serv);
-         return true;
+
+         // Save the port number in shared memory so that clients
+         // know where to connect.
+         mIPCServ->GetLocal(addr);
+         *portnum = addr.Service();
       }
 
-      // If we get here, then Audacity is currently active or it has
-      // failed, leaving the socket inode defined in the filesystem.
-      //
-      // So, we try to connect to it and if that is successful, we
-      // forward all filenames listed on the command line to the
-      // active process.
-      //
-      // If we can't connect after several attempts, we assume we've
-      // had a failure, cleanup the socket inode, and loop back up to
-      // retry creating a server.
+      // Now that the server is active, we release the LOCK semaphore
+      // to allow any waiters to continue. The SERVER semaphore will
+      // remain locked for the duration of this processes execution
+      // and will be cleaned up by the system.
+      op.sem_num = 0;
+      op.sem_op = 1;
+      semop(lockid, &op, 1);
 
-      // Setup the socket
-      //
-      // A wxSocketClient must not be deleted by us, but rather, let the
-      // framework do appropriate delayed deletion after Destroy()
-      Destroy_ptr<wxSocketClient> sock { safenew wxSocketClient() };
-      sock->SetFlags(wxSOCKET_WAITALL);
-
-      // We try up to 20 times since there's a small window
-      // where the server may not have been fully initialized.
-      for (int i = 0; i < 20; ++i)
+      // Bail if the server creation failed.
+      if (mIPCServ == nullptr)
       {
-         // Attempt to connect to an active Audacity.
-         sock->Connect(addr, true);
-         if (sock->IsConnected())
-         {
-            // Parse the command line to ensure correct syntax, but ignore
-            // options other than -v, and only use the filenames, if any.
-            auto parser = ParseCommandLine();
-            if (!parser)
-            {
-               // Complaints have already been made
-               return false;
-            }
+         AudacityMessageBox(
+            XO("The Audacity IPC server failed to initialize.\n\n"
+               "This is likely due to a resource shortage\n"
+               "and a reboot may be required."),
+            XO("Audacity Startup Failure"),
+            wxOK | wxICON_ERROR);
 
-            if (parser->Found(wxT("v")))
-            {
-               wxPrintf("Audacity v%s\n", AUDACITY_VERSION_STRING);
-               return false;
-            }
-
-            // Windows and Linux require absolute file names as command may
-            // not come from current working directory.
-            for (size_t j = 0, cnt = parser->GetParamCount(); j < cnt; ++j)
-            {
-               wxFileName filename(parser->GetParam(j));
-               if (filename.MakeAbsolute())
-               {
-                  const wxString param = filename.GetLongPath();
-                  sock->WriteMsg((const wxChar *) param, (param.length() + 1) * sizeof(wxChar));
-               }
-            }
-
-            // Send an empty string to force existing Audacity to front
-            sock->WriteMsg(wxEmptyString, sizeof(wxChar));
-
-            return sock->Error();
-         }
-
-         wxMilliSleep(100);
-
-         if (i == 0)
-         {
-            printf("Attempting to connect to Audacity failed...retrying\n");
-         }
+         return false;
       }
 
-      // At this point, we've exhausted our connections attempts. So, we assume
-      // that we've had a failure and clean up any existing socket inodes.
-      //
-      // We could use POSIX shared memory to store the servers PID and check that
-      // here to see if it's still active using kill(pid, 0), but I "think" it's
-      // a pretty safe bet that it's not.
+      // We've successfully created the socket server and the app
+      // should continue to initialize.
+      return true;
+   }
 
-      // Clean up the socket it if still exists.
-      wxFileName file(addr.Filename());
-      if (file.Exists())
+   // Retrieve the port number that the server is listening on.
+   addr.Service(*portnum);
+
+   // Now release the LOCK semaphore.
+   op.sem_num = 0;
+   op.sem_op = 1;
+   semop(lockid, &op, 1);
+
+   // If we get here, then Audacity is currently active. So, we connect
+   // to it and we forward all filenames listed on the command line to
+   // the active process.
+
+   // Setup the socket
+   //
+   // A wxSocketClient must not be deleted by us, but rather, let the
+   // framework do appropriate delayed deletion after Destroy()
+   Destroy_ptr<wxSocketClient> sock { safenew wxSocketClient() };
+   sock->SetFlags(wxSOCKET_WAITALL);
+
+   // Attempt to connect to an active Audacity.
+   sock->Connect(addr, true);
+   if (!sock->IsConnected())
+   {
+      // All attempts to become the server or connect to one have failed.  Not
+      // sure what we can say about the error, but it's probably not because
+      // Audacity is already running.
+      AudacityMessageBox(
+         XO("An unrecoverable error has occurred during startup"),
+         XO("Audacity Startup Failure"),
+         wxOK | wxICON_ERROR);
+
+      return false;
+   }
+
+   // Parse the command line to ensure correct syntax, but ignore
+   // options other than -v, and only use the filenames, if any.
+   auto parser = ParseCommandLine();
+   if (!parser)
+   {
+      // Complaints have already been made
+      return false;
+   }
+
+   // Display Audacity's version if requested
+   if (parser->Found(wxT("v")))
+   {
+      wxPrintf("Audacity v%s\n", AUDACITY_VERSION_STRING);
+
+      return false;
+   }
+
+#if defined(__WXMAC__)
+   // On macOS the client gets events from the wxWidgets framework that
+   // go to AudacityApp::MacOpenFile. Forward the file names to the prior
+   // instance via the socket.
+   for (const auto &filename: ofqueue)
+   {
+      auto str = filename.c_str().AsWChar();
+      sock->WriteMsg(str, (filename.length() + 1) * sizeof(*str));
+   }
+#endif
+
+   // On macOS and Linux, forward any file names found in the command
+   // line arguments.
+   for (size_t j = 0, cnt = parser->GetParamCount(); j < cnt; ++j)
+   {
+      wxFileName filename(parser->GetParam(j));
+      if (filename.MakeAbsolute())
       {
-         // Reset the sockets permissions in case they got munged somehow.
-         file.SetPermissions( wxS_DEFAULT );
-
-         // And remove it
-         wxRemove(file.GetFullPath());
+         const wxString param = filename.GetLongPath();
+         sock->WriteMsg((const wxChar *) param, (param.length() + 1) * sizeof(wxChar));
       }
    }
 
-   // All attempts to become the server or connect to one have failed.  Not
-   // sure what we can say about the error, but it's probably not because
-   // Audacity is already running.
-   AudacityMessageBox(
-      XO("An unrecoverable error has occurred during startup"),
-      XO("Audacity Startup Failure"),
-      wxOK | wxICON_ERROR);
+   // Send an empty string to force existing Audacity to front
+   sock->WriteMsg(wxEmptyString, sizeof(wxChar));
 
+   // We've forwarded all of the filenames, so let the caller know
+   // to terminate.
    return false;
 }
 
@@ -2041,17 +2201,6 @@ int AudacityApp::OnExit()
 
    // Terminate the PluginManager (must be done before deleting the locale)
    PluginManager::Get().Terminate();
-
-   if (mIPCServ)
-   {
-#if defined(__UNIX__)
-      wxUNIXaddress addr;
-      if (mIPCServ->GetLocal(addr))
-      {
-         remove(OSFILENAME(addr.Filename()));
-      }
-#endif
-   }
 
    return 0;
 }

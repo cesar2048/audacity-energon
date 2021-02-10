@@ -39,6 +39,7 @@ and on Mac OS X for the filesystem.
 // Otherwise, you get link errors.
 
 wxChar Internat::mDecimalSeparator = wxT('.'); // default
+// exclude is used by SanitiseFilename.
 wxArrayString Internat::exclude;
 
 // DA: Use tweaked translation mechanism to replace 'Audacity' by 'DarkAudacity'.
@@ -102,11 +103,20 @@ void Internat::Init()
    // or to directories
    auto forbid = wxFileName::GetForbiddenChars(format);
 
-   for(auto cc: forbid)
+   for (auto cc: forbid) {
+#if defined(__WXGTK__)
+      if (cc == wxT('*') || cc == wxT('?')) {
+         continue;
+      }
+#endif
       exclude.push_back(wxString{ cc });
+   }
 
    // The path separators may not be forbidden, so add them
-   auto separators = wxFileName::GetPathSeparators(format);
+   //auto separators = wxFileName::GetPathSeparators(format);
+
+   // Bug 1441 exclude all separators from filenames on all platforms.
+   auto separators = wxString("\\/");
 
    for(auto cc: separators) {
       if (forbid.Find(cc) == wxNOT_FOUND)

@@ -311,7 +311,7 @@ EffectEqualization::EffectEqualization(int Options)
    mBench=false;
 #endif
 
-   // We expect these Hi and Lo frequences to be overridden by Init().
+   // We expect these Hi and Lo frequencies to be overridden by Init().
    // Don't use inputTracks().  See bug 2321.
 #if 0
    auto trackList = inputTracks();
@@ -352,11 +352,11 @@ TranslatableString EffectEqualization::GetDescription()
 
 wxString EffectEqualization::ManualPage()
 {
-
+   // Bug 2509: Must use _ and not space in names.
    if( mOptions == kEqOptionGraphic )
-      return wxT("Graphic EQ");
+      return wxT("Graphic_EQ");
    if( mOptions == kEqOptionCurve )
-      return wxT("Filter Curve EQ");
+      return wxT("Filter_Curve_EQ");
    return wxT("Equalization");
 }
 
@@ -1373,6 +1373,8 @@ bool EffectEqualization::ProcessOne(int count, WaveTrack * t,
       output->Append((samplePtr)buffer.get(), floatSample, mM - 1);
       output->Flush();
 
+      std::vector<EnvPoint> envPoints;
+
       // now move the appropriate bit of the output back to the track
       // (this could be enhanced in the future to use the tails)
       double offsetT0 = t->LongSamplesToTime(offset);
@@ -1412,7 +1414,14 @@ bool EffectEqualization::ProcessOne(int count, WaveTrack * t,
 
          //save them
          clipStartEndTimes.push_back(std::pair<double,double>(clipStartT,clipEndT));
+
+         // Save the envelope points
+         const auto &env = *clip->GetEnvelope();
+         for (size_t i = 0, numPoints = env.GetNumberOfPoints(); i < numPoints; ++i) {
+            envPoints.push_back(env[i]);
+         }
       }
+
       //now go thru and replace the old clips with NEW
       for(unsigned int i = 0; i < clipStartEndTimes.size(); i++)
       {
@@ -1428,6 +1437,12 @@ bool EffectEqualization::ProcessOne(int count, WaveTrack * t,
             !(clipRealStartEndTimes[i].first <= startT &&
             clipRealStartEndTimes[i].second >= startT+lenT) )
             t->Join(clipRealStartEndTimes[i].first,clipRealStartEndTimes[i].second);
+      }
+
+      // Restore the envelope points
+      for (auto point : envPoints) {
+         WaveClip *clip = t->GetClipAtTime(point.GetT());
+         clip->GetEnvelope()->Insert(point.GetT(), point.GetVal());
       }
    }
 

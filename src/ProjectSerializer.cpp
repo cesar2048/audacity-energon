@@ -39,7 +39,7 @@
 //    name dictionary   dictionary of all names used in the document
 //    data fields       the "encoded" XML document
 //
-// If a subtree is added, it will be preceeded with FT_Push to tell the decoder
+// If a subtree is added, it will be preceded with FT_Push to tell the decoder
 // to preserve the active dictionary.  The decoder will then restore the
 // dictionary when an FT_Pop is encountered.  Nesting is unlimited.
 //
@@ -74,7 +74,7 @@ enum FieldTypes
 // Static so that the dict can be reused each time.
 //
 // If entries get added later, like when an envelope node (for example)
-// is writen and then the envelope is later removed, the dict will still
+// is written and then the envelope is later removed, the dict will still
 // contain the envelope name, but that's not a problem.
 
 NameMap ProjectSerializer::mNames;
@@ -382,8 +382,8 @@ bool ProjectSerializer::DictChanged() const
    return mDictChanged;
 }
 
-// See ProjectFileIO::CheckForOrphans() for explanation of the blockids arg
-wxString ProjectSerializer::Decode(const wxMemoryBuffer &buffer, BlockIDs &blockids)
+// See ProjectFileIO::LoadProject() for explanation of the blockids arg
+wxString ProjectSerializer::Decode(const wxMemoryBuffer &buffer)
 {
    wxMemoryInputStream in(buffer.GetData(), buffer.GetDataLen());
 
@@ -549,16 +549,6 @@ wxString ProjectSerializer::Decode(const wxMemoryBuffer &buffer, BlockIDs &block
             {
                id = ReadUShort( in );
                long long val = ReadLongLong( in );
-
-               // Look for and save the "blockid" values to support orphan
-               // block checking. This should be removed once serialization
-               // and related blocks become part of the same transaction.
-               const wxString &name = Lookup(id);
-               if (name.IsSameAs(wxT("blockid")))
-               {
-                  blockids.insert(val);
-               }
-
                out.WriteAttr(Lookup(id), val);
             }
             break;

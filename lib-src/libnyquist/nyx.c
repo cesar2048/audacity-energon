@@ -9,6 +9,7 @@
 **********************************************************************/
 
 /* system includes */
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,6 +60,7 @@ extern LVAL fnodes;
 /* nyquist externs */
 extern LVAL a_sound;
 extern snd_list_type zero_snd_list;
+extern FILE *tfp;  /* transcript file pointer */
 
 /* globals */
 LOCAL nyx_os_callback     nyx_os_cb = NULL;
@@ -74,7 +76,7 @@ LOCAL XLCONTEXT           nyx_cntxt;
 LOCAL int                 nyx_first_time = 1;
 LOCAL LVAL                nyx_obarray;
 LOCAL FLOTYPE             nyx_warp_stretch;
-LOCAL long                nyx_input_length = 0;
+LOCAL int64_t             nyx_input_length = 0;
 LOCAL char               *nyx_audio_name = NULL;
 
 /* Suspension node */
@@ -82,7 +84,7 @@ typedef struct nyx_susp_struct {
    snd_susp_node       susp;        // Must be first
    nyx_audio_callback  callback;
    void               *userdata;
-   long                len;
+   int64_t             len;
    int                 channel;
 } nyx_susp_node, *nyx_susp_type;
 
@@ -542,7 +544,7 @@ LOCAL void nyx_susp_fetch(nyx_susp_type susp, snd_list_type snd_list)
 {
    sample_block_type         out;
    sample_block_values_type  out_ptr;
-   long                      n;
+   int64_t                   n;
    int                       err;
 
    falloc_sample_block(out, "nyx_susp_fetch");
@@ -613,7 +615,7 @@ void nyx_set_audio_name(const char *name)
    nyx_audio_name = strdup(name);
 }
 
-void nyx_set_audio_params(double rate, long len)
+void nyx_set_audio_params(double rate, int64_t len)
 {
    LVAL flo;
    LVAL con;
@@ -651,7 +653,7 @@ void nyx_set_audio_params(double rate, long len)
 void nyx_set_input_audio(nyx_audio_callback callback,
                          void *userdata,
                          int num_channels,
-                         long len, double rate)
+                         int64_t len, double rate)
 {
    LVAL val;
    int ch;
@@ -860,9 +862,20 @@ nyx_rval nyx_eval_expression(const char *expr_string)
    while (nyx_expr_pos < nyx_expr_len) {
       expr = NULL;
 
+      // Simulate the prompt
+      if (tfp) {
+         ostputc('>');
+         ostputc(' ');
+      }
+
       // Read an expression
       if (!xlread(getvalue(s_stdin), &expr, FALSE)) {
          break;
+      }
+
+      // Simulate the prompt
+      if (tfp) {
+         ostputc('\n');
       }
 
       #if 0
@@ -873,6 +886,11 @@ nyx_rval nyx_eval_expression(const char *expr_string)
 
       // Evaluate the expression
       nyx_result = xleval(expr);
+
+      // Print it
+      if (tfp) {
+         stdprint(nyx_result);
+      }
    }
 
    // This will unwind the xlisp context and restore internals to a point just
@@ -923,8 +941,8 @@ int nyx_get_audio(nyx_audio_callback callback, void *userdata)
 {
    float *buffer = NULL;
    sound_type *snds = NULL;
-   long *totals = NULL;
-   long *lens = NULL;
+   int64_t *totals = NULL;
+   int64_t *lens = NULL;
    sound_type snd;
    int result = 0;
    int num_channels;
@@ -957,12 +975,12 @@ int nyx_get_audio(nyx_audio_callback callback, void *userdata)
       goto finish;
    }
 
-   totals = (long *) malloc(num_channels * sizeof(long));
+   totals = (int64_t *) malloc(num_channels * sizeof(int64_t));
    if (totals == NULL) {
       goto finish;
    }
 
-   lens = (long *) malloc(num_channels * sizeof(long));
+   lens = (int64_t *) malloc(num_channels * sizeof(int64_t));
    if (lens == NULL) {
       goto finish;
    }
@@ -982,10 +1000,10 @@ int nyx_get_audio(nyx_audio_callback callback, void *userdata)
       LVAL val = getvalue(xlenter("LEN"));
       if (val != s_unbound) {
          if (ntype(val) == FLONUM) {
-            nyx_input_length = (long) getflonum(val);
+            nyx_input_length = (int64_t) getflonum(val);
          }
          else if (ntype(val) == FIXNUM) {
-            nyx_input_length = (long) getfixnum(val);
+            nyx_input_length = (int64_t) getfixnum(val);
          }
       }
    }
@@ -997,7 +1015,7 @@ int nyx_get_audio(nyx_audio_callback callback, void *userdata)
       else {
          snd = getsound(getelement(nyx_result, ch));
       }
-      snds[ch] = snd;
+      snds[ch] = sound_copy(snd);
       totals[ch] = 0;
       lens[ch] = nyx_input_length;
    }
@@ -1005,7 +1023,7 @@ int nyx_get_audio(nyx_audio_callback callback, void *userdata)
    while (result == 0) {
       for (ch =0 ; ch < num_channels; ch++) {
          sample_block_type block;
-         long cnt;
+         int cnt;
          int i;
 
          snd = snds[ch];
@@ -1033,6 +1051,10 @@ int nyx_get_audio(nyx_audio_callback callback, void *userdata)
 
          totals[ch] += cnt;
       }
+   }
+
+   for (ch = 0 ; ch < num_channels; ch++) {
+      sound_unref(snds[ch]);
    }
 
    // This will unwind the xlisp context and restore internals to a point just
@@ -1202,12 +1224,18 @@ int ostgetc()
 {
    if (nyx_expr_pos < nyx_expr_len) {
       fflush(stdout);
+      if (tfp && nyx_expr_string[nyx_expr_pos] != '\n') {
+         ostputc(nyx_expr_string[nyx_expr_pos]);
+      }
       return (nyx_expr_string[nyx_expr_pos++]);
    }
    else if (nyx_expr_pos == nyx_expr_len) {
       /* Add whitespace at the end so that the parser
          knows that this is the end of the expression */
       nyx_expr_pos++;
+      if (tfp) {
+         ostputc('\n');
+      }
       return '\n';
    }
 
@@ -1228,11 +1256,6 @@ void osfinish(void)
 void oserror(const char *msg)
 {
    errputstr(msg);
-}
-
-long osrand(long n)
-{
-   return (((int) rand()) % n);
 }
 
 /* cd ..
@@ -1296,6 +1319,9 @@ void ostputc(int ch)
 
    if (nyx_output_cb) {
       nyx_output_cb(ch, nyx_output_ud);
+      if (tfp) {
+         putc(ch, tfp);
+      }
    }
    else {
       putchar((char) ch);
@@ -1572,6 +1598,32 @@ void get_xlisp_path(char *p, long p_max)
 
    strncpy(p, paths, p_max);
    p[p_max-1] = 0;
+}
+
+/* xgetrealtime - get current time in seconds */
+LVAL xgetrealtime()
+{
+    static const uint64_t EPOCH = ((uint64_t)116444736000000000ULL);
+    SYSTEMTIME system_time;
+    FILETIME file_time;
+    uint64_t time;
+    GetSystemTime(&system_time);
+    SystemTimeToFileTime(&system_time, &file_time);
+    time = (uint64_t) file_time.dwLowDateTime;
+    time += ((uint64_t) file_time.dwHighDateTime) << 32;
+    time -= EPOCH;
+    time /= 10000000L;
+    return cvflonum((double) time + system_time.wMilliseconds * 0.001);
+}
+#else
+#include <sys/time.h>
+
+/* xgetrealtime - get current time in seconds */
+LVAL xgetrealtime(void)
+{
+    struct timeval te;
+    gettimeofday(&te, NULL); // get current time
+    return cvflonum((double) te.tv_sec + (te.tv_usec * 1e-6));
 }
 #endif
 

@@ -247,7 +247,7 @@ public:
    {
       return {
          /* i18n-hint: do not translate avformat.  Preserve the computer gibberish.*/
-         { XO("Only avformat.dll"), { wxT("avformat.dll") } },
+         { XO("Only avformat.dll"), { GetLibAVFormatName() } },
          FileNames::DynamicLibraries,
          FileNames::AllFiles
       };
@@ -929,7 +929,7 @@ private:
    }
 };
 
-// utilites for RAII:
+// utilities for RAII:
 
 // Deleter adaptor for functions like av_free that take a pointer
 

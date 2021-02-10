@@ -63,6 +63,8 @@ list( APPEND SOURCES
    PRIVATE
       AColor.cpp
       AColor.h
+      ActiveProjects.cpp
+      ActiveProjects.h
       AboutDialog.cpp
       AboutDialog.h
       AdornedRulerPanel.cpp
@@ -73,8 +75,11 @@ list( APPEND SOURCES
       Audacity.h
       AudacityApp.cpp
       AudacityApp.h
+      $<$<BOOL:${wxIS_MAC}>:AudacityApp.mm>
       AudacityException.cpp
       AudacityException.h
+      AudacityFileConfig.cpp
+      AudacityFileConfig.h
       AudacityHeaders.cpp
       AudacityHeaders.h
       AudacityLogger.cpp
@@ -106,6 +111,8 @@ list( APPEND SOURCES
       CrashReport.cpp
       CrashReport.h
       DarkThemeAsCeeCode.h
+      DBConnection.cpp
+      DBConnection.h
       DeviceChange.cpp
       DeviceChange.h
       DeviceManager.cpp
@@ -268,6 +275,8 @@ list( APPEND SOURCES
       SseMathFuncs.h
       Tags.cpp
       Tags.h
+      TempDirectory.cpp
+      TempDirectory.h
       Theme.cpp
       Theme.h
       ThemeAsCeeCode.h
@@ -704,8 +713,6 @@ list( APPEND SOURCES
       prefs/PrefsDialog.h
       prefs/PrefsPanel.cpp
       prefs/PrefsPanel.h
-      prefs/ProjectsPrefs.cpp
-      prefs/ProjectsPrefs.h
       prefs/QualityPrefs.cpp
       prefs/QualityPrefs.h
       prefs/RecordingPrefs.cpp
@@ -770,6 +777,7 @@ list( APPEND SOURCES
       tracks/labeltrack/ui/LabelTextHandle.h
       tracks/labeltrack/ui/LabelTrackControls.cpp
       tracks/labeltrack/ui/LabelTrackControls.h
+      tracks/labeltrack/ui/LabelTrackShifter.cpp
       tracks/labeltrack/ui/LabelTrackVRulerControls.cpp
       tracks/labeltrack/ui/LabelTrackVRulerControls.h
       tracks/labeltrack/ui/LabelTrackView.cpp
@@ -778,6 +786,7 @@ list( APPEND SOURCES
       tracks/playabletrack/notetrack/ui/NoteTrackButtonHandle.h
       tracks/playabletrack/notetrack/ui/NoteTrackControls.cpp
       tracks/playabletrack/notetrack/ui/NoteTrackControls.h
+      tracks/playabletrack/notetrack/ui/NoteTrackShifter.cpp
       tracks/playabletrack/notetrack/ui/NoteTrackSliderHandles.cpp
       tracks/playabletrack/notetrack/ui/NoteTrackSliderHandles.h
       tracks/playabletrack/notetrack/ui/NoteTrackVRulerControls.cpp
@@ -804,6 +813,7 @@ list( APPEND SOURCES
       tracks/playabletrack/wavetrack/ui/SpectrumView.h
       tracks/playabletrack/wavetrack/ui/WaveTrackControls.cpp
       tracks/playabletrack/wavetrack/ui/WaveTrackControls.h
+      tracks/playabletrack/wavetrack/ui/WaveTrackShifter.cpp
       tracks/playabletrack/wavetrack/ui/WaveTrackSliderHandles.cpp
       tracks/playabletrack/wavetrack/ui/WaveTrackSliderHandles.h
       tracks/playabletrack/wavetrack/ui/WaveTrackVRulerControls.cpp
@@ -824,6 +834,8 @@ list( APPEND SOURCES
       tracks/timetrack/ui/TimeTrackControls.h
       tracks/timetrack/ui/TimeTrackVRulerControls.cpp
       tracks/timetrack/ui/TimeTrackVRulerControls.h
+      tracks/timetrack/ui/TimeTrackVZoomHandle.cpp
+      tracks/timetrack/ui/TimeTrackVZoomHandle.h
       tracks/timetrack/ui/TimeTrackView.cpp
       tracks/timetrack/ui/TimeTrackView.h
 
@@ -884,19 +896,21 @@ list( APPEND SOURCES
       widgets/ErrorDialog.h
       widgets/ExpandingToolBar.cpp
       widgets/ExpandingToolBar.h
+      widgets/FileConfig.cpp
+      widgets/FileConfig.h
       widgets/FileDialog/FileDialog.cpp
       widgets/FileDialog/FileDialog.h
       $<$<BOOL:${wxIS_WIN}>:
-	widgets/FileDialog/win/FileDialogPrivate.cpp
-	widgets/FileDialog/win/FileDialogPrivate.h
+         widgets/FileDialog/win/FileDialogPrivate.cpp
+         widgets/FileDialog/win/FileDialogPrivate.h
       >
       $<$<BOOL:${wxIS_MAC}>:
-	widgets/FileDialog/mac/FileDialogPrivate.mm
-	widgets/FileDialog/mac/FileDialogPrivate.h
+         widgets/FileDialog/mac/FileDialogPrivate.mm
+         widgets/FileDialog/mac/FileDialogPrivate.h
       >
       $<$<BOOL:${wxIS_GTK}>:
-	widgets/FileDialog/gtk/FileDialogPrivate.cpp
-	widgets/FileDialog/gtk/FileDialogPrivate.h
+         widgets/FileDialog/gtk/FileDialogPrivate.cpp
+         widgets/FileDialog/gtk/FileDialogPrivate.h
       >
       widgets/FileHistory.cpp
       widgets/FileHistory.h
@@ -940,6 +954,7 @@ list( APPEND SOURCES
       widgets/valnum.h
       widgets/wxPanelWrapper.cpp
       widgets/wxPanelWrapper.h
+      widgets/wxTextCtrlWrapper.h
 
       # XML handling
       xml/XMLFileReader.cpp
@@ -1011,6 +1026,9 @@ list( APPEND OPTIONS
    PRIVATE
       $<$<CXX_COMPILER_ID:MSVC>:/permissive->
       $<$<CXX_COMPILER_ID:AppleClang,Clang>:-Wno-underaligned-exception-object>
+      $<$<CXX_COMPILER_ID:AppleClang,Clang>:-Werror=return-type>
+      $<$<CXX_COMPILER_ID:AppleClang,Clang>:-Werror=dangling-else>
+      $<$<CXX_COMPILER_ID:AppleClang,Clang>:-Werror=return-stack-address>
 )
 
 list( APPEND LDFLAGS
@@ -1044,7 +1062,7 @@ list( APPEND LIBRARIES
       $<$<BOOL:${USE_MIDI}>:portsmf>
       $<$<BOOL:${USE_NYQUIST}>:libnyquist>
       $<$<BOOL:${USE_PORTMIXER}>:portmixer>
-      $<$<BOOL:${USE_SBSMS}>:sbsms>
+      $<$<BOOL:${USE_SBSMS}>:libsbsms>
       $<$<BOOL:${USE_SOUNDTOUCH}>:soundtouch>
       $<$<BOOL:${USE_VAMP}>:libvamp>
       $<$<PLATFORM_ID:Linux,FreeBSD,OpenBSD,NetBSD,CYGWIN>:PkgConfig::GLIB>
@@ -1162,6 +1180,7 @@ elseif( CMAKE_SYSTEM_NAME MATCHES "Darwin" )
    # These sources must be compiled as Objective C++ and excluded
    # from precompiled header usage
    set_source_files_properties(
+      AudacityApp.mm
       KeyboardCapture.cpp
       effects/EffectUI.cpp
       effects/VST/VSTControlOSX.mm

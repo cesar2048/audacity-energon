@@ -15,15 +15,12 @@
 
 #include <wx/mstream.h> // member variables
 
-#include <set>
+#include <unordered_set>
 #include <unordered_map>
 #include "audacity/Types.h"
 
 // From SampleBlock.h
 using SampleBlockID = long long;
-
-// From ProjectFileiIO.h
-using BlockIDs = std::set<SampleBlockID>;
 
 ///
 /// ProjectSerializer
@@ -69,7 +66,7 @@ public:
    bool DictChanged() const;
 
    // Returns empty string if decoding fails
-   static wxString Decode(const wxMemoryBuffer &buffer, BlockIDs &blockids);
+   static wxString Decode(const wxMemoryBuffer &buffer);
 
 private:
    void WriteName(const wxString & name);

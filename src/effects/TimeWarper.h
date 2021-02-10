@@ -43,8 +43,8 @@ split points in the input.
 \class GeometricOutputRateTimeWarper
 \brief TimeScale - rate varies geometrically with output
 
-\class StepTimeWarper
-\brief Like identity but with a jump
+\class PasteTimeWarper
+\brief Unit slope but with either a jump (pasting more) or a flat interval (pasting less)
 
 \class RegionTimeWarper
 \brief No change before the specified region; during the region, warp according
@@ -177,13 +177,12 @@ public:
    double Warp(double originalTime) const override;
 };
 
-class StepTimeWarper final : public TimeWarper
+class PasteTimeWarper final : public TimeWarper
 {
 private:
-   double mTStep;
-   double mOffset;
+   const double mOldT1, mNewT1;
 public:
-   StepTimeWarper(double tStep, double offset);
+   PasteTimeWarper(double oldT1, double newT1);
    double Warp(double originalTime) const override;
 };
 

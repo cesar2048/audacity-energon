@@ -42,6 +42,7 @@ for shared and private configs - which need to move out.
 #include "audacity/EffectInterface.h"
 #include "audacity/ModuleInterface.h"
 
+#include "AudacityFileConfig.h"
 #include "FileNames.h"
 #include "ModuleManager.h"
 #include "PlatformCompatibility.h"
@@ -1776,6 +1777,9 @@ void PluginManager::Initialize()
    // Always load the registry first
    Load();
 
+   // And force load of setting to verify it's accessible
+   GetSettings();
+
    // Then look for providers (they may autoregister plugins)
    ModuleManager::Get().DiscoverProviders();
 
@@ -1929,7 +1933,9 @@ bool PluginManager::DropFile(const wxString &fileName)
 void PluginManager::Load()
 {
    // Create/Open the registry
-   wxFileConfig registry(wxEmptyString, wxEmptyString, FileNames::PluginRegistry());
+   auto pRegistry = AudacityFileConfig::Create(
+      {}, {}, FileNames::PluginRegistry());
+   auto &registry = *pRegistry;
 
    // If this group doesn't exist then we have something that's not a registry.
    // We should probably warn the user, but it's pretty unlikely that this will happen.
@@ -2008,7 +2014,7 @@ void PluginManager::Load()
    return;
 }
 
-void PluginManager::LoadGroup(wxFileConfig *pRegistry, PluginType type)
+void PluginManager::LoadGroup(FileConfig *pRegistry, PluginType type)
 {
 #ifdef __WXMAC__
    // Bug 1590: On Mac, we should purge the registry of Nyquist plug-ins
@@ -2270,7 +2276,9 @@ void PluginManager::LoadGroup(wxFileConfig *pRegistry, PluginType type)
 void PluginManager::Save()
 {
    // Create/Open the registry
-   wxFileConfig registry(wxEmptyString, wxEmptyString, FileNames::PluginRegistry());
+   auto pRegistry = AudacityFileConfig::Create(
+      {}, {}, FileNames::PluginRegistry());
+   auto &registry = *pRegistry;
 
    // Clear it out
    registry.DeleteAll();
@@ -2296,7 +2304,7 @@ void PluginManager::Save()
    registry.Flush();
 }
 
-void PluginManager::SaveGroup(wxFileConfig *pRegistry, PluginType type)
+void PluginManager::SaveGroup(FileConfig *pRegistry, PluginType type)
 {
    wxString group = GetPluginTypeString(type);
    for (PluginMap::iterator iter = mPlugins.begin(); iter != mPlugins.end(); ++iter)
@@ -2773,11 +2781,12 @@ PluginDescriptor & PluginManager::CreatePlugin(const PluginID & id,
    return plug;
 }
 
-wxFileConfig *PluginManager::GetSettings()
+FileConfig *PluginManager::GetSettings()
 {
    if (!mSettings)
    {
-      mSettings = std::make_unique<wxFileConfig>(wxEmptyString, wxEmptyString, FileNames::PluginSettings());
+      mSettings =
+         AudacityFileConfig::Create({}, {}, FileNames::PluginSettings());
 
       // Check for a settings version that we can understand
       if (mSettings->HasEntry(SETVERKEY))
@@ -2805,7 +2814,7 @@ wxFileConfig *PluginManager::GetSettings()
 
 bool PluginManager::HasGroup(const RegistryPath & group)
 {
-   wxFileConfig *settings = GetSettings();
+   auto settings = GetSettings();
 
    bool res = settings->HasGroup(group);
    if (res)

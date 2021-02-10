@@ -19,11 +19,12 @@
 #if USE_SBSMS
 
 #include "Effect.h"
-#include "../../../lib-src/header-substitutes/sbsms.h"
+#include <sbsms.h>
 
 using namespace _sbsms_;
 
 class LabelTrack;
+class TimeWarper;
 
 class EffectSBSMS /* not final */ : public Effect
 {
@@ -45,6 +46,8 @@ protected:
 
 private:
    bool ProcessLabelTrack(LabelTrack *track);
+   void Finalize(WaveTrack* orig, WaveTrack* out, const TimeWarper *warper);
+
    double rateStart, rateEnd, pitchStart, pitchEnd;
    bool bLinkRatePitch, bRateReferenceInput, bPitchReferenceInput;
    SlideType rateSlideType;

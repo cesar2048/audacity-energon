@@ -1592,7 +1592,7 @@ static void dump_config( 	lame_global_flags*	gfp )
       case JOINT_STEREO: wxPrintf(wxT( "Joint-Stereo\n" )); break;
       case DUAL_CHANNEL: wxPrintf(wxT( "Forced Stereo\n" )); break;
       case MONO:         wxPrintf(wxT( "Mono\n" )); break;
-      case NOT_SET:      /* FALLTROUGH */
+      case NOT_SET:      /* FALLTHROUGH */
       default:           wxPrintf(wxT( "Error (unknown)\n" )); break;
    }
 
@@ -1879,7 +1879,7 @@ ProgressResult ExportMP3::Export(AudacityProject *project,
    if (id3len && !endOfFile) {
       if (id3len > outFile.Write(id3buffer.get(), id3len)) {
          // TODO: more precise message
-         AudacityMessageBox( XO("Unable to export") );
+         ShowExportErrorDialog("MP3:1882");
          return ProgressResult::Cancelled;
       }
    }
@@ -1891,7 +1891,7 @@ ProgressResult ExportMP3::Export(AudacityProject *project,
    size_t bufferSize = std::max(0, exporter.GetOutBufferSize());
    if (bufferSize <= 0) {
       // TODO: more precise message
-      AudacityMessageBox( XO("Unable to export") );
+      ShowExportErrorDialog("MP3:1849");
       return ProgressResult::Cancelled;
    }
 
@@ -1902,7 +1902,7 @@ ProgressResult ExportMP3::Export(AudacityProject *project,
       auto mixer = CreateMixer(tracks, selectionOnly,
          t0, t1,
          channels, inSamples, true,
-         rate, floatSample, true, mixerSpec);
+         rate, floatSample, mixerSpec);
 
       TranslatableString title;
       if (rmode == MODE_SET) {
@@ -1963,7 +1963,7 @@ ProgressResult ExportMP3::Export(AudacityProject *project,
 
          if (bytes > (int)outFile.Write(buffer.get(), bytes)) {
             // TODO: more precise message
-            AudacityMessageBox( XO("Unable to export") );
+            ShowDiskFullExportErrorDialog(fName);
             updateResult = ProgressResult::Cancelled;
             break;
          }
@@ -1978,14 +1978,14 @@ ProgressResult ExportMP3::Export(AudacityProject *project,
 
       if (bytes < 0) {
          // TODO: more precise message
-         AudacityMessageBox( XO("Unable to export") );
+         ShowExportErrorDialog("MP3:1981");
          return ProgressResult::Cancelled;
       }
 
       if (bytes > 0) {
          if (bytes > (int)outFile.Write(buffer.get(), bytes)) {
             // TODO: more precise message
-            AudacityMessageBox( XO("Unable to export") );
+            ShowExportErrorDialog("MP3:1988");
             return ProgressResult::Cancelled;
          }
       }
@@ -1994,7 +1994,7 @@ ProgressResult ExportMP3::Export(AudacityProject *project,
       if (id3len > 0 && endOfFile) {
          if (bytes > (int)outFile.Write(id3buffer.get(), id3len)) {
             // TODO: more precise message
-            AudacityMessageBox( XO("Unable to export") );
+            ShowExportErrorDialog("MP3:1997");
             return ProgressResult::Cancelled;
          }
       }
@@ -2009,7 +2009,7 @@ ProgressResult ExportMP3::Export(AudacityProject *project,
           !outFile.Flush() ||
           !outFile.Close()) {
          // TODO: more precise message
-         AudacityMessageBox( XO("Unable to export") );
+         ShowExportErrorDialog("MP3:2012");
          return ProgressResult::Cancelled;
       }
    }

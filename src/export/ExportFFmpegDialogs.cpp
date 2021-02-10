@@ -60,7 +60,6 @@
 
 #include "../widgets/FileDialog/FileDialog.h"
 
-#include "../FileFormats.h"
 #include "../Mix.h"
 #include "../Tags.h"
 #include "../widgets/AudacityMessageBox.h"
@@ -809,7 +808,6 @@ void ExportFFmpegCustomOptions::PopulateOrExchange(ShuttleGui & S)
          }
          S.EndMultiColumn();
       }
-#
       S.EndHorizontalLay();
    }
    S.EndHorizontalLay();

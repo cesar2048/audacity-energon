@@ -35,15 +35,13 @@
 #endif
 
 #include <wx/defs.h>
-#include <wx/intl.h>    // needed for _("translated stings") even if we
+#include <wx/intl.h>    // needed for _("translated strings") even if we
                         // don't have libflac available
 
 #include "Import.h"
 #include "ImportPlugin.h"
 
 #include "../Tags.h"
-#include "../WaveClip.h"
-#include "../prefs/QualityPrefs.h"
 #include "../widgets/ProgressDialog.h"
 
 #define FLAC_HEADER "fLaC"
@@ -71,7 +69,6 @@ static Importer::RegisteredUnusableImportPlugin registered{
 
 #include "FLAC++/decoder.h"
 
-#include "../FileFormats.h"
 #include "../Prefs.h"
 #include "../WaveTrack.h"
 #include "ImportPlugin.h"
@@ -149,7 +146,7 @@ public:
 
    TranslatableString GetFileDescription() override;
    ByteCount GetFileUncompressedBytes() override;
-   ProgressResult Import(TrackFactory *trackFactory, TrackHolders &outTracks,
+   ProgressResult Import(WaveTrackFactory *trackFactory, TrackHolders &outTracks,
               Tags *tags) override;
 
    wxInt32 GetStreamCount() override { return 1; }
@@ -194,14 +191,11 @@ void MyFLACFile::metadata_callback(const FLAC__StreamMetadata *metadata)
          mFile->mBitsPerSample=metadata->data.stream_info.bits_per_sample;
          mFile->mNumSamples=metadata->data.stream_info.total_samples;
 
+         // Widen mFormat after examining the file header
          if (mFile->mBitsPerSample<=16) {
-            if (mFile->mFormat<int16Sample) {
-               mFile->mFormat=int16Sample;
-            }
+            mFile->mFormat=int16Sample;
          } else if (mFile->mBitsPerSample<=24) {
-            if (mFile->mFormat<int24Sample) {
-               mFile->mFormat=int24Sample;
-            }
+            mFile->mFormat=int24Sample;
          } else {
             mFile->mFormat=floatSample;
          }
@@ -339,7 +333,8 @@ FLACImportFileHandle::FLACImportFileHandle(const FilePath & name)
    mStreamInfoDone(false),
    mUpdateResult(ProgressResult::Success)
 {
-   mFormat = QualityPrefs::SampleFormatChoice();
+   // Initialize mFormat as narrowest
+   mFormat = narrowestSampleFormat;
    mFile = std::make_unique<MyFLACFile>(this);
 }
 
@@ -408,7 +403,7 @@ auto FLACImportFileHandle::GetFileUncompressedBytes() -> ByteCount
 }
 
 
-ProgressResult FLACImportFileHandle::Import(TrackFactory *trackFactory,
+ProgressResult FLACImportFileHandle::Import(WaveTrackFactory *trackFactory,
                                  TrackHolders &outTracks,
                                  Tags *tags)
 {
@@ -423,7 +418,7 @@ ProgressResult FLACImportFileHandle::Import(TrackFactory *trackFactory,
    {
       auto iter = mChannels.begin();
       for (size_t c = 0; c < mNumChannels; ++iter, ++c)
-         *iter = trackFactory->NewWaveTrack(mFormat, mSampleRate);
+         *iter = NewWaveTrack(*trackFactory, mFormat, mSampleRate);
    }
 
    // TODO: Vigilant Sentry: Variable res unused after assignment (error code DA1)
@@ -445,18 +440,37 @@ ProgressResult FLACImportFileHandle::Import(TrackFactory *trackFactory,
    if (!mChannels.empty())
       outTracks.push_back(std::move(mChannels));
 
+   wxString comment;
+   wxString description;
+
    tags->Clear();
    size_t cnt = mFile->mComments.size();
    for (size_t c = 0; c < cnt; c++) {
       wxString name = mFile->mComments[c].BeforeFirst(wxT('='));
       wxString value = mFile->mComments[c].AfterFirst(wxT('='));
-      if (name.Upper() == wxT("DATE") && !tags->HasTag(TAG_YEAR)) {
+      wxString upper = name.Upper();
+      if (upper == wxT("DATE") && !tags->HasTag(TAG_YEAR)) {
          long val;
          if (value.length() == 4 && value.ToLong(&val)) {
             name = TAG_YEAR;
          }
       }
+      else if (upper == wxT("COMMENT") || upper == wxT("COMMENTS")) {
+         comment = value;
+         continue;
+      }
+      else if (upper == wxT("DESCRIPTION")) {
+         description = value;
+         continue;
+      }
       tags->SetTag(name, value);
+   }
+
+   if (comment.empty()) {
+      comment = description;
+   }
+   if (!comment.empty()) {
+      tags->SetTag(TAG_COMMENTS, comment);
    }
 
    return mUpdateResult;

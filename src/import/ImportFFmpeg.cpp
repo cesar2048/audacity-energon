@@ -28,7 +28,6 @@ Licensed under the GNU General Public License v2 or later
 #include <wx/wxprec.h>
 
 #include "../FFmpeg.h"      // which brings in avcodec.h, avformat.h
-#include "../WaveClip.h"
 #ifndef WX_PRECOMP
 // Include your minimal set of headers here, or wx.h
 #include <wx/window.h>
@@ -112,6 +111,7 @@ static const auto exts = {
    wxT("nsv"),
    wxT("nuv"),
    wxT("ogg"),
+   wxT("opus"),
    wxT("psxstr"),
    wxT("pva"),
    wxT("redir"),
@@ -199,7 +199,7 @@ public:
 
    ///! Imports audio
    ///\return import status (see Import.cpp)
-   ProgressResult Import(TrackFactory *trackFactory, TrackHolders &outTracks,
+   ProgressResult Import(WaveTrackFactory *trackFactory, TrackHolders &outTracks,
       Tags *tags) override;
 
    ///! Reads next audio frame
@@ -466,7 +466,7 @@ auto FFmpegImportFileHandle::GetFileUncompressedBytes() -> ByteCount
    return 0;
 }
 
-ProgressResult FFmpegImportFileHandle::Import(TrackFactory *trackFactory,
+ProgressResult FFmpegImportFileHandle::Import(WaveTrackFactory *trackFactory,
               TrackHolders &outTracks,
               Tags *tags)
 {
@@ -516,7 +516,7 @@ ProgressResult FFmpegImportFileHandle::Import(TrackFactory *trackFactory,
       sc->m_initialchannels = sc->m_stream->codec->channels;
       stream.resize(sc->m_stream->codec->channels);
       for (auto &channel : stream)
-         channel = trackFactory->NewWaveTrack(sc->m_osamplefmt, sc->m_stream->codec->sample_rate);
+         channel = NewWaveTrack(*trackFactory, sc->m_osamplefmt, sc->m_stream->codec->sample_rate);
    }
 
    // Handles the start_time by creating silence. This may or may not be correct.
@@ -733,13 +733,21 @@ void FFmpegImportFileHandle::WriteMetadata(Tags *tags)
    tags->Clear();
 
    GetMetadata(tags, TAG_TITLE, "title");
-   GetMetadata(tags, TAG_ARTIST, "author");
-//   GetMetadata(tags, TAG_COPYRIGHT, "copyright");
    GetMetadata(tags, TAG_COMMENTS, "comment");
    GetMetadata(tags, TAG_ALBUM, "album");
-   GetMetadata(tags, TAG_YEAR, "year");
    GetMetadata(tags, TAG_TRACK, "track");
    GetMetadata(tags, TAG_GENRE, "genre");
+
+   if (wxString(mFormatContext->iformat->name).Contains("m4a"))
+   {
+      GetMetadata(tags, TAG_ARTIST, "artist");
+      GetMetadata(tags, TAG_YEAR, "date");
+   }
+   else
+   {
+      GetMetadata(tags, TAG_ARTIST, "author");
+      GetMetadata(tags, TAG_YEAR, "year");
+   }
 }
 
 void FFmpegImportFileHandle::GetMetadata(Tags *tags, const wxChar *tag, const char *name)

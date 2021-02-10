@@ -214,7 +214,7 @@ void ToolFrame::OnMotion( wxMouseEvent & event )
 
       rect.SetBottomRight( pos );
 
-      // Keep it within max size, if specificed
+      // Keep it within max size, if specified
       wxSize maxsz = mBar->GetMaxSize();
       if (maxsz != wxDefaultSize)
       {
@@ -1123,8 +1123,15 @@ void ToolManager::Expose( int type, bool show )
 void ToolManager::LayoutToolBars()
 {
    // Update the layout
-   mTopDock->LayoutToolBars();
-   mBotDock->LayoutToolBars();
+   if (mTopDock)
+   {
+      mTopDock->LayoutToolBars();
+   }
+
+   if (mBotDock)
+   {
+      mBotDock->LayoutToolBars();
+   }
 }
 
 //

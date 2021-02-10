@@ -180,6 +180,7 @@ ExportPCMOptions::ExportPCMOptions(wxWindow *parent, int selformat)
 ExportPCMOptions::~ExportPCMOptions()
 {
    // Save the encoding
+   SaveOtherFormat(mType);
    SaveEncoding(mType, sf_encoding_index_to_subtype(mEncodingIndexes[mEncodingFromChoice]));
 }
 
@@ -613,7 +614,7 @@ ProgressResult ExportPCM::Export(AudacityProject *project,
          auto mixer = CreateMixer(tracks, selectionOnly,
                                   t0, t1,
                                   info.channels, maxBlockLen, true,
-                                  rate, format, true, mixerSpec);
+                                  rate, format, mixerSpec);
 
          InitProgress( pDialog, fName,
             (selectionOnly
@@ -639,6 +640,8 @@ ProgressResult ExportPCM::Export(AudacityProject *project,
             if (static_cast<size_t>(samplesWritten) != numSamples) {
                char buffer2[1000];
                sf_error_str(sf.get(), buffer2, 1000);
+               //Used to give this error message
+#if 0
                AudacityMessageBox(
                   XO(
                   /* i18n-hint: %s will be the error message from libsndfile, which
@@ -646,6 +649,15 @@ ProgressResult ExportPCM::Export(AudacityProject *project,
                    * error" */
 "Error while writing %s file (disk full?).\nLibsndfile says \"%s\"")
                      .Format( formatStr, wxString::FromAscii(buffer2) ));
+#else
+               // But better to give the same error message as for
+               // other cases of disk exhaustion.
+               // The thrown exception doesn't escape but GuardedCall
+               // will enqueue a message.
+               GuardedCall([&fName]{
+                  throw FileException{
+                     FileException::Cause::Write, fName }; });
+#endif
                updateResult = ProgressResult::Cancelled;
                break;
             }
@@ -661,13 +673,13 @@ ProgressResult ExportPCM::Export(AudacityProject *project,
              fileFormat == SF_FORMAT_WAVEX) {
             if (!AddStrings(project, sf.get(), metadata, sf_format)) {
                // TODO: more precise message
-               AudacityMessageBox( XO("Unable to export") );
+               ShowExportErrorDialog("PCM:675");
                return ProgressResult::Cancelled;
             }
          }
          if (0 != sf.close()) {
             // TODO: more precise message
-            AudacityMessageBox( XO("Unable to export") );
+            ShowExportErrorDialog("PCM:681");
             return ProgressResult::Cancelled;
          }
       }
@@ -680,7 +692,7 @@ ProgressResult ExportPCM::Export(AudacityProject *project,
          // Note: file has closed, and gets reopened and closed again here:
          if (!AddID3Chunk(fName, metadata, sf_format) ) {
             // TODO: more precise message
-            AudacityMessageBox( XO("Unable to export") );
+            ShowExportErrorDialog("PCM:694");
             return ProgressResult::Cancelled;
          }
 

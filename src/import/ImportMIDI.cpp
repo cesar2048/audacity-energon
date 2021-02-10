@@ -36,7 +36,7 @@
 bool DoImportMIDI( AudacityProject &project, const FilePath &fileName )
 {
    auto &tracks = TrackList::Get( project );
-   auto newTrack = TrackFactory::Get( project ).NewNoteTrack();
+   auto newTrack =  std::make_shared<NoteTrack>();
    
    if (::ImportMIDI(fileName, newTrack.get())) {
       
@@ -44,6 +44,14 @@ bool DoImportMIDI( AudacityProject &project, const FilePath &fileName )
       auto pTrack = tracks.Add( newTrack );
       pTrack->SetSelected(true);
       
+      // Fix the bug 2109.
+      // In case the project had soloed tracks before importing,
+      // the newly imported track is muted.
+      const bool projectHasSolo =
+         !(tracks.Any<PlayableTrack>() + &PlayableTrack::GetSolo).empty();
+      if (projectHasSolo)
+         pTrack->SetMute(true);
+
       ProjectHistory::Get( project )
          .PushState(
             XO("Imported MIDI from '%s'").Format( fileName ),

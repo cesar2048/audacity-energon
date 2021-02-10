@@ -10,7 +10,7 @@ Paul Licameli split from AudacityProject.cpp
 
 #include "ProjectFileIO.h"
 
-
+#include <atomic>
 #include <sqlite3.h>
 #include <wx/crt.h>
 #include <wx/frame.h>
@@ -18,24 +18,32 @@ Paul Licameli split from AudacityProject.cpp
 #include <wx/sstream.h>
 #include <wx/xml/xml.h>
 
-#include "FileNames.h"
+#include "ActiveProjects.h"
+#include "DBConnection.h"
 #include "Project.h"
 #include "ProjectFileIORegistry.h"
 #include "ProjectSerializer.h"
 #include "ProjectSettings.h"
 #include "SampleBlock.h"
-#include "Sequence.h"
 #include "Tags.h"
-#include "TimeTrack.h"
+#include "TempDirectory.h"
 #include "ViewInfo.h"
-#include "WaveClip.h"
 #include "WaveTrack.h"
 #include "widgets/AudacityMessageBox.h"
+#include "widgets/ErrorDialog.h"
 #include "widgets/NumericTextCtrl.h"
 #include "widgets/ProgressDialog.h"
+#include "wxFileNameWrapper.h"
 #include "xml/XMLFileReader.h"
 
+#undef NO_SHM
+#if !defined(__WXMSW__)
+   #define NO_SHM
+#endif
+
 wxDEFINE_EVENT(EVT_PROJECT_TITLE_CHANGE, wxCommandEvent);
+wxDEFINE_EVENT( EVT_CHECKPOINT_FAILURE, wxCommandEvent);
+wxDEFINE_EVENT( EVT_RECONNECTION_FAILURE, wxCommandEvent);
 
 static const int ProjectFileID = ('A' << 24 | 'U' << 16 | 'D' << 8 | 'Y');
 static const int ProjectFileVersion = 1;
@@ -129,19 +137,6 @@ static const char *ProjectFileSchema =
    "  samples              BLOB"
    ");";
 
-// Configuration to provide "safe" connections
-static const char *SafeConfig =
-   "PRAGMA <schema>.locking_mode = SHARED;"
-   "PRAGMA <schema>.synchronous = NORMAL;"
-   "PRAGMA <schema>.journal_mode = WAL;"
-   "PRAGMA <schema>.wal_autocheckpoint = 0;";
-
-// Configuration to provide "Fast" connections
-static const char *FastConfig =
-   "PRAGMA <schema>.locking_mode = SHARED;"
-   "PRAGMA <schema>.synchronous = OFF;"
-   "PRAGMA <schema>.journal_mode = OFF;";
-
 // This singleton handles initialization/shutdown of the SQLite library.
 // It is needed because our local SQLite is built with SQLITE_OMIT_AUTOINIT
 // defined.
@@ -161,7 +156,7 @@ public:
          mRc = sqlite3_initialize();
       }
 
-#if !defined(__WXMSW__)
+#ifdef NO_SHM
       if (mRc == SQLITE_OK)
       {
          // Use the "unix-excl" VFS to make access to the DB exclusive.  This gets
@@ -251,81 +246,102 @@ const ProjectFileIO &ProjectFileIO::Get( const AudacityProject &project )
    return Get( const_cast< AudacityProject & >( project ) );
 }
 
-ProjectFileIO::ProjectFileIO(AudacityProject &)
+ProjectFileIO::ProjectFileIO(AudacityProject &project)
+   : mProject{ project }
+   , mpErrors{ std::make_shared<DBConnectionErrors>() }
 {
    mPrevConn = nullptr;
-   mCurrConn = nullptr;
 
    mRecovered = false;
    mModified = false;
    mTemporary = true;
-   mBypass = false;
 
    UpdatePrefs();
 }
 
-void ProjectFileIO::Init( AudacityProject &project )
-{
-   // This step can't happen in the ctor of ProjectFileIO because ctor of
-   // AudacityProject wasn't complete
-   mpProject = project.shared_from_this();
-}
-
 ProjectFileIO::~ProjectFileIO()
 {
-   wxASSERT_MSG(mCurrConn == nullptr, wxT("Project file was not closed at shutdown"));
 }
 
-Connection &ProjectFileIO::Conn()
+bool ProjectFileIO::HasConnection() const
 {
-   if (!mCurrConn)
+   auto &connectionPtr = ConnectionPtr::Get( mProject );
+   return connectionPtr.mpConnection != nullptr;
+}
+
+DBConnection &ProjectFileIO::GetConnection()
+{
+   auto &curConn = CurrConn();
+   if (!curConn)
    {
       if (!OpenConnection())
       {
          throw SimpleMessageBoxException
          {
-            XO("Failed to open the project's database")
+            XO("Failed to open the project's database"),
+            XO("Warning"),
+            "Error:_Disk_full_or_not_writable"
          };
       }
    }
 
-   return mCurrConn;
+   return *curConn;
 }
 
 sqlite3 *ProjectFileIO::DB()
 {
-   return Conn()->DB();
+   return GetConnection().DB();
 }
 
+/*!
+ @pre *CurConn() does not exist
+ @post *CurConn() exists or return value is false
+ */
 bool ProjectFileIO::OpenConnection(FilePath fileName /* = {}  */)
 {
-   wxASSERT(mCurrConn == nullptr);
-   bool temp = false;
+   auto &curConn = CurrConn();
+   wxASSERT(!curConn);
+   bool isTemp = false;
 
    if (fileName.empty())
    {
       fileName = GetFileName();
       if (fileName.empty())
       {
-         fileName = FileNames::UnsavedProjectFileName();
-         temp = true;
+         fileName = TempDirectory::UnsavedProjectFileName();
+         isTemp = true;
+      }
+   }
+   else
+   {
+      // If this project resides in the temporary directory, then we'll mark it
+      // as temporary.
+      wxFileName temp(TempDirectory::TempDir(), wxT(""));
+      wxFileName file(fileName);
+      file.SetFullName(wxT(""));
+      if (file == temp)
+      {
+         isTemp = true;
       }
    }
 
-   mCurrConn = std::make_unique<DBConnection>(this);
-   if (!mCurrConn->Open(fileName))
+   // Pass weak_ptr to project into DBConnection constructor
+   curConn = std::make_unique<DBConnection>(
+      mProject.shared_from_this(), mpErrors, [this]{ OnCheckpointFailure(); } );
+   if (!curConn->Open(fileName))
    {
-      mCurrConn = nullptr;
+      curConn.reset();
       return false;
    }
 
    if (!CheckVersion())
    {
       CloseConnection();
+      curConn.reset();
       return false;
    }
 
-   mTemporary = temp;
+   mTemporary = isTemp;
 
    SetFileName(fileName);
 
@@ -334,13 +350,15 @@ bool ProjectFileIO::OpenConnection(FilePath fileName /* = {}  */)
 
 bool ProjectFileIO::CloseConnection()
 {
-   wxASSERT(mCurrConn != nullptr);
+   auto &curConn = CurrConn();
+   if (!curConn)
+      return false;
 
-   if (!mCurrConn->Close())
+   if (!curConn->Close())
    {
       return false;
    }
-   mCurrConn = nullptr;
+   curConn.reset();
 
    SetFileName({});
 
@@ -354,7 +372,7 @@ void ProjectFileIO::SaveConnection()
    // Should do nothing in proper usage, but be sure not to leak a connection:
    DiscardConnection();
 
-   mPrevConn = std::move(mCurrConn);
+   mPrevConn = std::move(CurrConn());
    mPrevFileName = mFileName;
    mPrevTemporary = mTemporary;
 
@@ -370,8 +388,20 @@ void ProjectFileIO::DiscardConnection()
       {
          // Store an error message
          SetDBError(
-            XO("Failed to successfully close the source project file")
+            XO("Failed to discard connection")
          );
+      }
+
+      // If this is a temporary project, we no longer want to keep the
+      // project file.
+      if (mPrevTemporary)
+      {
+         // This is just a safety check.
+         wxFileName temp(TempDirectory::TempDir(), wxT(""));
+         wxFileName file(mPrevFileName);
+         file.SetFullName(wxT(""));
+         if (file == temp)
+            RemoveProject(mPrevFileName);
       }
       mPrevConn = nullptr;
       mPrevFileName.clear();
@@ -381,18 +411,19 @@ void ProjectFileIO::DiscardConnection()
 // Close any current connection and switch back to using the saved
 void ProjectFileIO::RestoreConnection()
 {
-   if (mCurrConn)
+   auto &curConn = CurrConn();
+   if (curConn)
    {
-      if (!mCurrConn->Close())
+      if (!curConn->Close())
       {
          // Store an error message
          SetDBError(
-            XO("Failed to successfully close the destination project file")
+            XO("Failed to restore connection")
          );
       }
    }
 
-   mCurrConn = std::move(mPrevConn);
+   curConn = std::move(mPrevConn);
    SetFileName(mPrevFileName);
    mTemporary = mPrevTemporary;
 
@@ -401,73 +432,11 @@ void ProjectFileIO::RestoreConnection()
 
 void ProjectFileIO::UseConnection(Connection &&conn, const FilePath &filePath)
 {
-   wxASSERT(mCurrConn == nullptr);
+   auto &curConn = CurrConn();
+   wxASSERT(!curConn);
 
-   mCurrConn = std::move(conn);
+   curConn = std::move(conn);
    SetFileName(filePath);
-}
-
-bool ProjectFileIO::TransactionStart(const wxString &name)
-{
-   char *errmsg = nullptr;
-
-   int rc = sqlite3_exec(DB(),
-                         wxT("SAVEPOINT ") + name + wxT(";"),
-                         nullptr,
-                         nullptr,
-                         &errmsg);
-
-   if (errmsg)
-   {
-      SetDBError(
-         XO("Failed to create savepoint:\n\n%s").Format(name)
-      );
-      sqlite3_free(errmsg);
-   }
-
-   return rc == SQLITE_OK;
-}
-
-bool ProjectFileIO::TransactionCommit(const wxString &name)
-{
-   char *errmsg = nullptr;
-
-   int rc = sqlite3_exec(DB(),
-                         wxT("RELEASE ") + name + wxT(";"),
-                         nullptr,
-                         nullptr,
-                         &errmsg);
-
-   if (errmsg)
-   {
-      SetDBError(
-         XO("Failed to release savepoint:\n\n%s").Format(name)
-      );
-      sqlite3_free(errmsg);
-   }
-
-   return rc == SQLITE_OK;
-}
-
-bool ProjectFileIO::TransactionRollback(const wxString &name)
-{
-   char *errmsg = nullptr;
-
-   int rc = sqlite3_exec(DB(),
-                         wxT("ROLLBACK TO ") + name + wxT(";"),
-                         nullptr,
-                         nullptr,
-                         &errmsg);
-
-   if (errmsg)
-   {
-      SetDBError(
-         XO("Failed to release savepoint:\n\n%s").Format(name)
-      );
-      sqlite3_free(errmsg);
-   }
-
-   return rc == SQLITE_OK;
 }
 
 static int ExecCallback(void *data, int cols, char **vals, char **names)
@@ -491,9 +460,9 @@ int ProjectFileIO::Exec(const char *query, const ExecCB &callback)
    if (rc != SQLITE_ABORT && errmsg)
    {
       SetDBError(
-         XO("Failed to execute a project file command:\n\n%s").Format(query)
+         XO("Failed to execute a project file command:\n\n%s").Format(query),
+         Verbatim(errmsg)
       );
-      mLibraryError = Verbatim(errmsg);
    }
    if (errmsg)
    {
@@ -680,7 +649,7 @@ void ProjectFileIO::InSet(sqlite3_context *context, int argc, sqlite3_value **ar
    sqlite3_result_int(context, blockids->find(blockid) != blockids->end());
 }
 
-bool ProjectFileIO::CheckForOrphans(BlockIDs &blockids)
+bool ProjectFileIO::DeleteBlocks(const BlockIDs &blockids, bool complement)
 {
    auto db = DB();
    int rc;
@@ -692,15 +661,19 @@ bool ProjectFileIO::CheckForOrphans(BlockIDs &blockids)
    });
 
    // Add the function used to verify each row's blockid against the set of active blockids
-   rc = sqlite3_create_function(db, "inset", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, &blockids, InSet, nullptr, nullptr);
+   const void *p = &blockids;
+   rc = sqlite3_create_function(db, "inset", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, const_cast<void*>(p), InSet, nullptr, nullptr);
    if (rc != SQLITE_OK)
    {
       wxLogDebug(wxT("Unable to add 'inset' function"));
       return false;
    }
 
-   // Delete all rows that are orphaned
-   rc = sqlite3_exec(db, "DELETE FROM sampleblocks WHERE NOT inset(blockid);", nullptr, nullptr, nullptr);
+   // Delete all rows in the set, or not in it
+   auto sql = wxString::Format(
+      "DELETE FROM sampleblocks WHERE %sinset(blockid);",
+      complement ? "NOT " : "" );
+   rc = sqlite3_exec(db, sql, nullptr, nullptr, nullptr);
    if (rc != SQLITE_OK)
    {
       wxLogWarning(XO("Cleanup of orphan blocks failed").Translation());
@@ -718,37 +691,27 @@ bool ProjectFileIO::CheckForOrphans(BlockIDs &blockids)
    return true;
 }
 
-Connection ProjectFileIO::CopyTo(const FilePath &destpath,
-                                 const TranslatableString &msg,
-                                 bool prune /* = false */,
-                                 const std::shared_ptr<TrackList> &tracks /* = nullptr */)
+bool ProjectFileIO::CopyTo(const FilePath &destpath,
+   const TranslatableString &msg,
+   bool isTemporary,
+   bool prune /* = false */,
+   const std::vector<const TrackList *> &tracks /* = {} */)
 {
-   // Get access to the active tracklist
-   auto pProject = mpProject.lock();
-   if (!pProject)
-   {
-      return nullptr;
-   }
-   auto &tracklist = tracks ? *tracks : TrackList::Get(*pProject);
+   auto pConn = CurrConn().get();
+   if (!pConn)
+      return false;
 
-   BlockIDs blockids;
+   // Get access to the active tracklist
+   auto pProject = &mProject;
+
+   SampleBlockIDSet blockids;
 
    // Collect all active blockids
    if (prune)
    {
-      for (auto wt : tracklist.Any<const WaveTrack>())
-      {
-         // Scan all clips within current track
-         for (const auto &clip : wt->GetAllClips())
-         {
-            // Scan all sample blocks within current clip
-            auto blocks = clip->GetSequenceBlockArray();
-            for (const auto &block : *blocks)
-            {
-               blockids.insert(block.sb->GetBlockID());
-            }
-         }
-      }
+      for (auto trackList : tracks)
+         if (trackList)
+            InspectBlocks( *trackList, {}, &blockids );
    }
    // Collect ALL blockids
    else
@@ -762,19 +725,20 @@ Connection ProjectFileIO::CopyTo(const FilePath &destpath,
 
       if (!Query("SELECT blockid FROM sampleblocks;", cb))
       {
-         return nullptr;
+         // Error message already captured.
+         return false;
       }
    }
 
    // Create the project doc
    ProjectSerializer doc;
    WriteXMLHeader(doc);
-   WriteXML(doc, false, tracks);
+   WriteXML(doc, false, tracks.empty() ? nullptr : tracks[0]);
 
    auto db = DB();
    Connection destConn = nullptr;
    bool success = false;
-   int rc;
+   int rc = SQLITE_OK;
    ProgressResult res = ProgressResult::Success;
 
    // Cleanup in case things go awry
@@ -788,8 +752,26 @@ Connection ProjectFileIO::CopyTo(const FilePath &destpath,
             destConn = nullptr;
          }
 
+         // Rollback transaction in case one was active.
+         // If this fails (probably due to memory or disk space), the transaction will
+         // (presumably) stil be active, so further updates to the project file will
+         // fail as well. Not really much we can do about it except tell the user.
+         auto result = sqlite3_exec(db, "ROLLBACK;", nullptr, nullptr, nullptr);
+
+         // Only capture the error if there wasn't a previous error
+         if (result != SQLITE_OK && (rc == SQLITE_DONE || rc == SQLITE_OK))
+         {
+            SetDBError(
+               XO("Failed to rollback transaction during import")
+            );
+         }
+
+         // And detach the outbound DB in case (if it's attached). Don't check for
+         // errors since it may not be attached. But, if it is and the DETACH fails,
+         // subsequent CopyTo() actions will fail until Audacity is relaunched.
          sqlite3_exec(db, "DETACH DATABASE outbound;", nullptr, nullptr, nullptr);
 
+         // RemoveProject not necessary to clean up attached database
          wxRemoveFile(destpath);
       }
    });
@@ -804,17 +786,27 @@ Connection ProjectFileIO::CopyTo(const FilePath &destpath,
       SetDBError(
          XO("Unable to attach destination database")
       );
-      return nullptr;
+      return false;
    }
 
    // Ensure attached DB connection gets configured
-   mCurrConn->FastMode("outbound");
+   //
+   // NOTE:  Between the above attach and setting the mode here, a normal DELETE
+   //        mode journal will be used and will briefly appear in the filesystem.
+   if (!pConn->FastMode("outbound"))
+   {
+      SetDBError(
+         XO("Unable to switch to fast journaling mode")
+      );
+
+      return false;
+   }
 
    // Install our schema into the new database
    if (!InstallSchema(db, "outbound"))
    {
       // Message already set
-      return nullptr;
+      return false;
    }
 
    // Copy over tags (not really used yet)
@@ -829,7 +821,7 @@ Connection ProjectFileIO::CopyTo(const FilePath &destpath,
          XO("Failed to copy tags")
       );
 
-      return nullptr;
+      return false;
    }
 
    {
@@ -839,6 +831,7 @@ Connection ProjectFileIO::CopyTo(const FilePath &destpath,
       {
          if (stmt)
          {
+            // No need to check return code
             sqlite3_finalize(stmt);
          }
       });
@@ -856,7 +849,7 @@ Connection ProjectFileIO::CopyTo(const FilePath &destpath,
          SetDBError(
             XO("Unable to prepare project file command:\n\n%s").Format(sql)
          );
-         return nullptr;
+         return false;
       }
 
       /* i18n-hint: This title appears on a dialog that indicates the progress
@@ -880,9 +873,14 @@ Connection ProjectFileIO::CopyTo(const FilePath &destpath,
       for (auto blockid : blockids)
       {
          // Bind statement parameters
-         if (sqlite3_bind_int64(stmt, 1, blockid) != SQLITE_OK)
+         rc = sqlite3_bind_int64(stmt, 1, blockid);
+         if (rc != SQLITE_OK)
          {
-            wxASSERT_MSG(false, wxT("Binding failed...bug!!!"));
+            SetDBError(
+               XO("Failed to bind SQL parameter")
+            );
+
+            return false;
          }
 
          // Process it
@@ -892,7 +890,7 @@ Connection ProjectFileIO::CopyTo(const FilePath &destpath,
             SetDBError(
                XO("Failed to update the project file.\nThe following command failed:\n\n%s").Format(sql)
             );
-            return nullptr;
+            return false;
          }
 
          // Reset statement to beginning
@@ -906,14 +904,18 @@ Connection ProjectFileIO::CopyTo(const FilePath &destpath,
          {
             // Note that we're not setting success, so the finally
             // block above will take care of cleaning up
-            return nullptr;
+            return false;
          }
       }
 
-      // Write the project doc
-      if (!WriteDoc("project", doc, "outbound"))
+      // Write the doc.
+      //
+      // If we're compacting a temporary project (user initiated from the File
+      // menu), then write the doc to the "autosave" table since temporary
+      // projects do not have a "project" doc.
+      if (!WriteDoc(isTemporary ? "autosave" : "project", doc, "outbound"))
       {
-         return nullptr;
+         return false;
       }
 
       // See BEGIN above...
@@ -928,83 +930,43 @@ Connection ProjectFileIO::CopyTo(const FilePath &destpath,
          XO("Destination project could not be detached")
       );
 
-      return nullptr;
-   }
-
-   // Open the newly created database
-   destConn = std::make_unique<DBConnection>(this);
-   if (!destConn->Open(destpath))
-   {
-      SetDBError(
-         XO("Failed to open copy of project file")
-      );
-
-      destConn = nullptr;
-
-      return nullptr;
+      return false;
    }
 
    // Tell cleanup everything is good to go
    success = true;
 
-   return destConn;
+   return true;
 }
 
-bool ProjectFileIO::ShouldVacuum(const std::shared_ptr<TrackList> &tracks)
+bool ProjectFileIO::ShouldCompact(const std::vector<const TrackList *> &tracks)
 {
-   std::set<long long> active;
+   SampleBlockIDSet active;
    unsigned long long current = 0;
 
-   // Scan all wave tracks
-   for (auto wt : tracks->Any<const WaveTrack>())
    {
-      // Scan all clips within current track
-      for (const auto &clip : wt->GetAllClips())
-      {
-         // Scan all sample blocks within current clip
-         auto blocks = clip->GetSequenceBlockArray();
-         for (const auto &block : *blocks)
-         {
-            const auto &sb = block.sb;
-            auto blockid = sb->GetBlockID();
-
-            // Accumulate space used by the block if the blockid has not
-            // yet been seen
-            if (active.count(blockid) == 0)
-            {
-               current += sb->GetSpaceUsage();
-
-               active.insert(blockid);
-            }
-         }
-      }
+      auto fn = BlockSpaceUsageAccumulator( current );
+      for (auto pTracks : tracks)
+         if (pTracks)
+            InspectBlocks( *pTracks, fn,
+               &active // Visit unique blocks only
+            );
    }
 
    // Get the number of blocks and total length from the project file.
+   unsigned long long total = GetTotalUsage();
    unsigned long long blockcount = 0;
-   unsigned long long total = 0;
-
-   auto cb =
-   [&blockcount, &total](int cols, char **vals, char **){
-      if ( cols != 2 )
-         // Should have two exactly!
-         return 1;
-      if ( total > 0 ) {
-         // Should not have multiple rows!
-         total = 0;
-         return 1;
-      }
+   
+   auto cb = [&blockcount](int cols, char **vals, char **)
+   {
       // Convert
-      wxString{ vals[0] }.ToULongLong( &blockcount );
-      wxString{ vals[1] }.ToULongLong( &total );
+      wxString(vals[0]).ToULongLong(&blockcount);
       return 0;
    };
-   if (!Query("SELECT Count(*), "
-     "Sum(Length(summary256)) + Sum(Length(summary64k)) + Sum(Length(samples)) "
-     "FROM sampleblocks;", cb)
-       || total == 0)
+
+   if (!Query("SELECT Count(*) FROM sampleblocks;", cb) || blockcount == 0)
    {
-      // Shouldn't vacuum since we don't have the full picture
+      // Shouldn't compact since we don't have the full picture
       return false;
    }
 
@@ -1017,116 +979,295 @@ bool ProjectFileIO::ShouldVacuum(const std::shared_ptr<TrackList> &tracks)
    wxLogDebug(wxT("used = %lld total = %lld %lld"), current, total, total ? current / total : 0);
    if (!total || current / total > 80)
    {
-      wxLogDebug(wxT("not vacuuming"));
+      wxLogDebug(wxT("not compacting"));
       return false;
    }
-   wxLogDebug(wxT("vacuuming"));
+   wxLogDebug(wxT("compacting"));
 
    return true;
 }
 
-void ProjectFileIO::Vacuum(const std::shared_ptr<TrackList> &tracks)
+Connection &ProjectFileIO::CurrConn()
 {
-   // Haven't vacuumed yet
-   mWasVacuumed = false;
+   auto &connectionPtr = ConnectionPtr::Get( mProject );
+   return connectionPtr.mpConnection;
+}
 
-   // Assume we have unused block until we found out otherwise. That way cleanup
+const std::vector<wxString> &ProjectFileIO::AuxiliaryFileSuffixes()
+{
+   static const std::vector<wxString> strings {
+      "-wal",
+#ifndef NO_SHM
+      "-shm",
+#endif
+   };
+   return strings;
+}
+
+FilePath ProjectFileIO::SafetyFileName(const FilePath &src)
+{
+   wxFileNameWrapper fn{ src };
+
+   // Extra characters inserted into filename before extension
+   wxString extra =
+#ifdef __WXGTK__
+      wxT("~")
+#else
+      wxT(".bak")
+#endif
+   ;
+
+   int nn = 1;
+   auto numberString = [](int num) -> wxString {
+      return num == 1 ? "" : wxString::Format(".%d", num);
+   };
+
+   auto suffixes = AuxiliaryFileSuffixes();
+   suffixes.push_back({});
+
+   // Find backup paths not already occupied; check all auxiliary suffixes
+   const auto name = fn.GetName();
+   FilePath result;
+   do {
+      fn.SetName( name + numberString(nn++) + extra );
+      result = fn.GetFullPath();
+   }
+   while( std::any_of(suffixes.begin(), suffixes.end(), [&](auto &suffix){
+      return wxFileExists(result + suffix);
+   }) );
+
+   return result;
+}
+
+bool ProjectFileIO::RenameOrWarn(const FilePath &src, const FilePath &dst)
+{
+   std::atomic_bool done = {false};
+   bool success = false;
+   auto thread = std::thread([&]
+   {
+      success = wxRenameFile(src, dst);
+      done = true;
+   });
+
+   auto &window = GetProjectFrame( mProject );
+
+   // Provides a progress dialog with indeterminate mode
+   wxGenericProgressDialog pd(XO("Copying Project").Translation(),
+                              XO("This may take several seconds").Translation(),
+                              300000,     // range
+                              &window,     // parent
+                              wxPD_APP_MODAL | wxPD_ELAPSED_TIME | wxPD_SMOOTH);
+
+   // Wait for the checkpoints to end
+   while (!done)
+   {
+      wxMilliSleep(50);
+      pd.Pulse();
+   }
+   thread.join();
+
+   if (!success)
+   {
+      ShowErrorDialog(
+         &window,
+         XO("Error Writing to File"),
+         XO("Audacity failed to write file %s.\n"
+            "Perhaps disk is full or not writable.\n"
+            "For tips on freeing up space, click the help button.")
+            .Format(dst),
+         "Error:_Disk_full_or_not_writable"
+         );
+      return false;
+   }
+
+   return true;
+}
+
+bool ProjectFileIO::MoveProject(const FilePath &src, const FilePath &dst)
+{
+   // Assume the src database file is not busy.
+   if (!RenameOrWarn(src, dst))
+      return false;
+
+   // So far so good, but the separate -wal and -shm files might yet exist,
+   // as when checkpointing failed for limited space on the drive.
+   // If so move them too or else lose data.
+
+   std::vector< std::pair<FilePath, FilePath> > pairs{ { src, dst } };
+   bool success = false;
+   auto cleanup = finally([&]{
+      if (!success) {
+         // If any one of the renames failed, back out the previous ones.
+         // This should be a no-fail recovery!  Not clear what to do if any
+         // of these renames fails.
+         for (auto &pair : pairs) {
+            if (!(pair.first.empty() && pair.second.empty()))
+               wxRenameFile(pair.second, pair.first);
+         }
+      }
+   });
+
+   for (const auto &suffix : AuxiliaryFileSuffixes()) {
+      auto srcName = src + suffix;
+      if (wxFileExists(srcName)) {
+         auto dstName = dst + suffix;
+         if (!RenameOrWarn(srcName, dstName))
+            return false;
+         pairs.push_back({ srcName, dstName });
+      }
+   }
+
+   return (success = true);
+}
+
+bool ProjectFileIO::RemoveProject(const FilePath &filename)
+{
+   if (!wxFileExists(filename))
+      return false;
+
+   bool success = wxRemoveFile(filename);
+   auto &suffixes = AuxiliaryFileSuffixes();
+   for (const auto &suffix : suffixes) {
+      auto file = filename + suffix;
+      if (wxFileExists(file))
+         success = wxRemoveFile(file) && success;
+   }
+   return success;
+}
+
+ProjectFileIO::BackupProject::BackupProject(
+   ProjectFileIO &projectFileIO, const FilePath &path )
+{
+   auto safety = SafetyFileName(path);
+   if (!projectFileIO.MoveProject(path, safety))
+      return;
+
+   mPath = path;
+   mSafety = safety;
+}
+
+void ProjectFileIO::BackupProject::Discard()
+{
+   if (!mPath.empty()) {
+      // Succeeded; don't need the safety files
+      RemoveProject(mSafety);
+      mSafety.clear();
+   }
+}
+
+ProjectFileIO::BackupProject::~BackupProject()
+{
+   if (!mPath.empty()) {
+      if (!mSafety.empty()) {
+         // Failed; restore from safety files
+         auto suffixes = AuxiliaryFileSuffixes();
+         suffixes.push_back({});
+         for (const auto &suffix : suffixes) {
+            auto path = mPath + suffix;
+            if (wxFileExists(path))
+               wxRemoveFile(path);
+            wxRenameFile(mSafety + suffix, mPath + suffix);
+         }
+      }
+   }
+}
+
+void ProjectFileIO::Compact(
+   const std::vector<const TrackList *> &tracks, bool force)
+{
+   // Haven't compacted yet
+   mWasCompacted = false;
+
+   // Assume we have unused blocks until we find out otherwise. That way cleanup
    // at project close time will still occur.
    mHadUnused = true;
 
-   // Don't vacuum if this is a temporary project or if it's determined there are not
-   // enough unused blocks to make it worthwhile
-   if (IsTemporary() || !ShouldVacuum(tracks))
+   // If forcing compaction, bypass inspection.
+   if (!force)
    {
-      // Delete the AutoSave doc it if exists
-      if (IsModified())
+      // Don't compact if this is a temporary project or if it's determined there are not
+      // enough unused blocks to make it worthwhile.
+      if (IsTemporary() || !ShouldCompact(tracks))
       {
-         // PRL:  not clear what to do if the following fails, but the worst should
-         // be, the project may reopen in its present state as a recovery file, not
-         // at the last saved state.
-         (void) AutoSaveDelete();
+         // Delete the AutoSave doc it if exists
+         if (IsModified())
+         {
+            // PRL:  not clear what to do if the following fails, but the worst should
+            // be, the project may reopen in its present state as a recovery file, not
+            // at the last saved state.
+            // REVIEW: Could the autosave file be corrupt though at that point, and so 
+            // prevent recovery?
+            // LLL: I believe Paul is correct since it's deleted with a single SQLite
+            // transaction. The next time the file opens will just invoke recovery.
+            (void) AutoSaveDelete();
+         }
+
+         return;
       }
-
-      return;
    }
-
-   // Create the project doc
-   ProjectSerializer doc;
-   WriteXMLHeader(doc);
-   WriteXML(doc, false, tracks);
 
    wxString origName = mFileName;
-   wxString tempName = origName + "_vacuum";
+   wxString backName = origName + "_compact_back";
+   wxString tempName = origName + "_compact_temp";
 
-   // Must close the database to rename it
-   if (!CloseConnection())
+   // Copy the original database to a new database. Only prune sample blocks if
+   // we have a tracklist.
+   // REVIEW: Compact can fail on the CopyTo with no error messages.  That's OK?
+   // LLL: We could display an error message or just ignore the failure and allow
+   // the file to be compacted the next time it's saved.
+   if (CopyTo(tempName, XO("Compacting project"), IsTemporary(), !tracks.empty(), tracks))
    {
-      return;
+      // Must close the database to rename it
+      if (CloseConnection())
+      {
+         // Only use the new file if it is actually smaller than the original.
+         //
+         // If the original file doesn't have anything to compact (original and new
+         // are basically identical), the file could grow by a few pages because of
+         // differences in how SQLite constructs the b-tree.
+         //
+         // In this case, just toss the new file and continue to use the original.
+         //
+         // Also, do this after closing the connection so that the -wal file
+         // gets cleaned up.
+         if (wxFileName::GetSize(tempName) < wxFileName::GetSize(origName))
+         {
+            // Rename the original to backup
+            if (wxRenameFile(origName, backName))
+            {
+               // Rename the temporary to original
+               if (wxRenameFile(tempName, origName))
+               {
+                  // Open the newly compacted original file
+                  OpenConnection(origName);
+
+                  // Remove the old original file
+                  wxRemoveFile(backName);
+
+                  // Remember that we compacted
+                  mWasCompacted = true;
+
+                  return;
+               }
+
+               wxRenameFile(backName, origName);
+            }
+         }
+
+         OpenConnection(origName);
+      }
+
+      // Did not achieve any real compaction
+      // RemoveProject not needed for what was an attached database
+      wxRemoveFile(tempName);
    }
-
-   // Shouldn't need to do this, but doesn't hurt.
-   wxRemoveFile(tempName);
-
-   // Rename the original to temporary
-   if (!wxRenameFile(origName, tempName))
-   {
-      OpenConnection(origName);
-
-      return;
-   }
-
-   // Reopen the original database using the temporary name
-   Connection tempConn = std::make_unique<DBConnection>(this);
-   if (!tempConn->Open(tempName))
-   {
-      SetDBError(XO("Failed to open project file"));
-
-      wxRenameFile(tempName, origName);
-
-      OpenConnection(origName);
-
-      return;
-   }
-
-   // Reactivate the original database using the temporary name
-   UseConnection(std::move(tempConn), tempName);
-
-   // Copy the original database to a new database while pruning unused sample blocks
-   Connection newConn = CopyTo(origName, XO("Compacting project"), true, tracks);
-
-   // Close connection referencing the original database via it's temporary name
-   CloseConnection();
-
-   // If the copy failed or we weren't able to write the project doc, backout
-   if (!newConn)
-   {
-      // AUD3 warn user somehow
-      wxRemoveFile(origName);
-
-      // AUD3 warn user somehow
-      wxRenameFile(tempName, origName);
-
-      // Reopen original file
-      OpenConnection(origName);
-
-      return;
-   }
-
-   // Use the newly vacuumed file and the original name.
-   UseConnection(std::move(newConn), origName);
-
-   // Remove the unvacuumed version of the original
-   wxRemoveFile(tempName);
-
-   // Remember that we vacuumed
-   mWasVacuumed = true;
 
    return;
 }
 
-bool ProjectFileIO::WasVacuumed()
+bool ProjectFileIO::WasCompacted()
 {
-   return mWasVacuumed;
+   return mWasCompacted;
 }
 
 bool ProjectFileIO::HadUnused()
@@ -1142,11 +1283,7 @@ void ProjectFileIO::UpdatePrefs()
 // Pass a number in to show project number, or -1 not to.
 void ProjectFileIO::SetProjectTitle(int number)
 {
-   auto pProject = mpProject.lock();
-   if (! pProject )
-      return;
-
-   auto &project = *pProject;
+   auto &project = mProject;
    auto pWindow = project.GetFrame();
    if (!pWindow)
    {
@@ -1196,14 +1333,21 @@ const FilePath &ProjectFileIO::GetFileName() const
 
 void ProjectFileIO::SetFileName(const FilePath &fileName)
 {
-   auto pProject = mpProject.lock();
-   if (! pProject )
-      return;
-   auto &project = *pProject;
+   auto &project = mProject;
+
+   if (!mFileName.empty())
+   {
+      ActiveProjects::Remove(mFileName);
+   }
 
    mFileName = fileName;
 
-   if (mTemporary)
+   if (!mFileName.empty())
+   {
+      ActiveProjects::Add(mFileName);
+   }
+
+   if (IsTemporary())
    {
       project.SetProjectName({});
    }
@@ -1217,10 +1361,7 @@ void ProjectFileIO::SetFileName(const FilePath &fileName)
 
 bool ProjectFileIO::HandleXMLTag(const wxChar *tag, const wxChar **attrs)
 {
-   auto pProject = mpProject.lock();
-   if (! pProject )
-      return false;
-   auto &project = *pProject;
+   auto &project = mProject;
    auto &window = GetProjectFrame(project);
    auto &viewInfo = ViewInfo::Get(project);
    auto &settings = ProjectSettings::Get(project);
@@ -1350,10 +1491,7 @@ bool ProjectFileIO::HandleXMLTag(const wxChar *tag, const wxChar **attrs)
 
 XMLTagHandler *ProjectFileIO::HandleXMLChild(const wxChar *tag)
 {
-   auto pProject = mpProject.lock();
-   if (! pProject )
-      return nullptr;
-   auto &project = *pProject;
+   auto &project = mProject;
    auto fn = ProjectFileIORegistry::Lookup(tag);
    if (fn)
    {
@@ -1361,6 +1499,12 @@ XMLTagHandler *ProjectFileIO::HandleXMLChild(const wxChar *tag)
    }
 
    return nullptr;
+}
+
+void ProjectFileIO::OnCheckpointFailure()
+{
+   wxCommandEvent evt{ EVT_CHECKPOINT_FAILURE };
+   mProject.ProcessEvent(evt);
 }
 
 void ProjectFileIO::WriteXMLHeader(XMLWriter &xmlFile) const
@@ -1380,13 +1524,10 @@ void ProjectFileIO::WriteXMLHeader(XMLWriter &xmlFile) const
 
 void ProjectFileIO::WriteXML(XMLWriter &xmlFile,
                              bool recording /* = false */,
-                             const std::shared_ptr<TrackList> &tracks /* = nullptr */)
+                             const TrackList *tracks /* = nullptr */)
 // may throw
 {
-   auto pProject = mpProject.lock();
-   if (! pProject )
-      THROW_INCONSISTENCY_EXCEPTION;
-   auto &proj = *pProject;
+   auto &proj = mProject;
    auto &tracklist = tracks ? *tracks : TrackList::Get(proj);
    auto &viewInfo = ViewInfo::Get(proj);
    auto &tags = Tags::Get(proj);
@@ -1413,7 +1554,7 @@ void ProjectFileIO::WriteXML(XMLWriter &xmlFile,
    tags.WriteXML(xmlFile);
 
    unsigned int ndx = 0;
-   tracklist.Any().Visit([&](Track *t)
+   tracklist.Any().Visit([&](const Track *t)
    {
       auto useTrack = t;
       if ( recording ) {
@@ -1484,7 +1625,7 @@ bool ProjectFileIO::WriteDoc(const char *table,
    int rc;
 
    // For now, we always use an ID of 1. This will replace the previously
-   // writen row every time.
+   // written row every time.
    char sql[256];
    sqlite3_snprintf(sizeof(sql),
                     sql,
@@ -1535,302 +1676,7 @@ bool ProjectFileIO::WriteDoc(const char *table,
    return true;
 }
 
-// Importing an AUP3 project into an AUP3 project is a bit different than
-// normal importing since we need to copy data from one DB to the other
-// while adjusting the sample block IDs to represent the newly assigned
-// IDs.
-bool ProjectFileIO::ImportProject(const FilePath &fileName)
-{
-   // Get access to the current project file
-   auto db = DB();
-
-   bool success = false;
-   bool restore = true;
-   int rc;
-
-   // Ensure the inbound database gets detached
-   auto detach = finally([&]
-   {
-      sqlite3_exec(db, "DETACH DATABASE inbound;", nullptr, nullptr, nullptr);
-   });
-
-   // Attach the inbound project file
-   wxString sql;
-   sql.Printf("ATTACH DATABASE 'file:%s?immutable=1&mode=ro' AS inbound;", fileName);
-
-   rc = sqlite3_exec(db, sql, nullptr, nullptr, nullptr);
-   if (rc != SQLITE_OK)
-   {
-      SetDBError(
-         XO("Unable to attach %s project file").Format(fileName)
-      );
-
-      return false;
-   }
-
-   // We need either the autosave or project docs from the inbound AUP3
-   wxMemoryBuffer buffer;
-
-   // Get the autosave doc, if any
-   if (!GetBlob("SELECT dict || doc FROM inbound.project WHERE id = 1;", buffer))
-   {
-      // Error already set
-      return false;
-   }
-
-   // If we didn't have an autosave doc, load the project doc instead
-   if (buffer.GetDataLen() == 0)
-   {
-      if (!GetBlob("SELECT dict || doc FROM inbound.autosave WHERE id = 1;", buffer))
-      {
-         // Error already set
-         return false;
-      }
-
-      // Missing both the autosave and project docs. This can happen if the
-      // system were to crash before the first autosave into a temporary file.
-      if (buffer.GetDataLen() == 0)
-      {
-         SetError(XO("Unable to load project or autosave documents"));
-         return false;
-      }
-   }
-
-   wxString project;
-   BlockIDs blockids;
-
-   // Decode it while capturing the associated sample blockids
-   project = ProjectSerializer::Decode(buffer, blockids);
-   if (project.size() == 0)
-   {
-      SetError(XO("Unable to decode project document"));
-
-      return false;
-   }
-
-   // Parse the project doc
-   wxStringInputStream in(project);
-   wxXmlDocument doc;
-   if (!doc.Load(in))
-   {
-      return false;
-   }
-
-   // Get the root ("project") node
-   wxXmlNode *root = doc.GetRoot();
-   wxASSERT(root->GetName().IsSameAs(wxT("project")));
-
-   // Soft delete all non-essential attributes to prevent updating the active
-   // project. This takes advantage of the knowledge that when a project is
-   // parsed, unrecognized attributes are simply ignored.
-   //
-   // This is necessary because we don't want any of the active project settings
-   // to be modified by the inbound project.
-   for (wxXmlAttribute *attr = root->GetAttributes(); attr; attr = attr->GetNext())
-   {
-      wxString name = attr->GetName();
-      if (!name.IsSameAs(wxT("version")) && !name.IsSameAs(wxT("audacityversion")))
-      {
-         attr->SetName(name + wxT("_deleted"));
-      }
-   }
-
-   // Recursively find and collect all waveblock nodes
-   std::vector<wxXmlNode *> blocknodes;
-   std::function<void(wxXmlNode *)> findblocks = [&](wxXmlNode *node)
-   {
-      while (node)
-      {
-         if (node->GetName().IsSameAs(wxT("waveblock")))
-         {
-            blocknodes.push_back(node);
-         }
-         else
-         {
-            findblocks(node->GetChildren());
-         }
-
-         node = node->GetNext();
-      }
-   };
-
-   // Get access to the active tracklist
-   auto pProject = mpProject.lock();
-   if (!pProject)
-   {
-      return false;
-   }
-   auto &tracklist = TrackList::Get(*pProject);
-
-   // Search for a timetrack and remove it if the project already has one
-   if (*tracklist.Any<TimeTrack>().begin())
-   {
-      // Find a timetrack and remove it if it exists
-      for (wxXmlNode *node = doc.GetRoot()->GetChildren(); node; node = node->GetNext())
-      {
-         if (node->GetName().IsSameAs(wxT("timetrack")))
-         {
-            AudacityMessageBox(
-               XO("The active project already has a time track and one was encountered in the project being imported, bypassing imported time track."),
-               XO("Project Import"),
-               wxOK | wxICON_EXCLAMATION | wxCENTRE,
-               &GetProjectFrame(*pProject));
-
-            root->RemoveChild(node);
-            break;
-         }
-      }
-   }
-
-   // Find all waveblocks in all wavetracks
-   for (wxXmlNode *node = doc.GetRoot()->GetChildren(); node; node = node->GetNext())
-   {
-      if (node->GetName().IsSameAs(wxT("wavetrack")))
-      {
-         findblocks(node->GetChildren());
-      }
-   }
-
-   {
-      // Cleanup...
-      sqlite3_stmt *stmt = nullptr;
-      auto cleanup = finally([&]
-      {
-         // Ensure the prepared statement gets cleaned up
-         if (stmt)
-         {
-            sqlite3_finalize(stmt);
-         }
-      });
-
-      // Prepare the statement to copy the sample block from the inbound project to the
-      // active project.  All columns other than the blockid column get copied.
-      wxString columns(wxT("sampleformat, summin, summax, sumrms, summary256, summary64k, samples"));
-      sql.Printf("INSERT INTO main.sampleblocks (%s)"
-                 "   SELECT %s"
-                 "   FROM inbound.sampleblocks"
-                 "   WHERE blockid = ?;",
-                 columns,
-                 columns);
-
-      rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
-      if (rc != SQLITE_OK)
-      {
-         SetDBError(
-            XO("Unable to prepare project file command:\n\n%s").Format(sql)
-         );
-         return false;
-      }
-
-      /* i18n-hint: This title appears on a dialog that indicates the progress
-         in doing something.*/
-      ProgressDialog progress(XO("Progress"), XO("Importing project"), pdlgHideStopButton);
-      ProgressResult result = ProgressResult::Success;
-
-      wxLongLong_t count = 0;
-      wxLongLong_t total = blocknodes.size();
-
-      sqlite3_exec(db, "BEGIN;", nullptr, nullptr, nullptr);
-
-      // Copy all the sample blocks from the inbound project file into
-      // the active one, while remembering which were copied.
-      for (auto node : blocknodes)
-      {
-         // Find the blockid attribute...it should always be there
-         wxXmlAttribute *attr = node->GetAttributes();
-         while (attr && !attr->GetName().IsSameAs(wxT("blockid")))
-         {
-            attr = attr->GetNext();
-         }
-         wxASSERT(attr != nullptr);
-
-         // And get the blockid
-         SampleBlockID blockid;
-         attr->GetValue().ToLongLong(&blockid);
-
-         // Bind statement parameters
-         // Might return SQL_MISUSE which means it's our mistake that we violated
-         // preconditions; should return SQL_OK which is 0
-         if (sqlite3_bind_int64(stmt, 1, blockid) != SQLITE_OK)
-         {
-            wxASSERT_MSG(false, wxT("Binding failed...bug!!!"));
-         }
-
-         // Process it
-         rc = sqlite3_step(stmt);
-         if (rc != SQLITE_DONE)
-         {
-            SetDBError(
-               XO("Failed to import sample block.\nThe following command failed:\n\n%s").Format(sql)
-            );
-
-            break;
-         }
-
-         // Replace the original blockid with the new one
-         attr->SetValue(wxString::Format(wxT("%lld"), sqlite3_last_insert_rowid(db)));
-
-         // Reset the statement for the next iteration
-         if (sqlite3_reset(stmt) != SQLITE_OK)
-         {
-            THROW_INCONSISTENCY_EXCEPTION;
-         }
-
-         // Remember that we copied this node in case the user cancels
-         result = progress.Update(++count, total);
-         if (result != ProgressResult::Success)
-         {
-            break;
-         }
-      }
-
-      // Bail if the import was cancelled or failed. If the user stopped the
-      // import or it completed, then we continue on.
-      if (rc != SQLITE_DONE || result == ProgressResult::Cancelled || result == ProgressResult::Failed)
-      {
-         sqlite3_exec(db, "ROLLBACK;", nullptr, nullptr, nullptr);
-         return false;
-      }
-
-      // Go ahead and commit now
-      sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr);
-
-      // Copy over tags...likely to produce duplicates...needs work once used
-      rc = sqlite3_exec(db,
-                        "INSERT INTO main.tags SELECT * FROM inbound.tags;",
-                        nullptr,
-                        nullptr,
-                        nullptr);
-      if (rc != SQLITE_OK)
-      {
-         SetDBError(
-            XO("Failed to import tags")
-         );
-
-         return false;
-      }
-   }
-
-   // Recreate the project doc with the revisions we've made above
-   wxStringOutputStream output;
-   doc.Save(output);
-
-   // Now load the document as normal
-   XMLFileReader xmlFile;
-   if (!xmlFile.ParseString(this, output.GetString()))
-   {
-      SetError(
-         XO("Unable to parse project information.")
-      );
-      mLibraryError = xmlFile.GetErrorStr();
-
-      return false;
-   }
-
-   return true;
-}
-
-bool ProjectFileIO::LoadProject(const FilePath &fileName)
+bool ProjectFileIO::LoadProject(const FilePath &fileName, bool ignoreAutosave)
 {
    bool success = false;
 
@@ -1850,13 +1696,13 @@ bool ProjectFileIO::LoadProject(const FilePath &fileName)
       return false;
    }
 
-   BlockIDs blockids;
    wxString project;
    wxMemoryBuffer buffer;
    bool usedAutosave = true;
 
    // Get the autosave doc, if any
-   if (!GetBlob("SELECT dict || doc FROM autosave WHERE id = 1;", buffer))
+   if (!ignoreAutosave &&
+       !GetBlob("SELECT dict || doc FROM autosave WHERE id = 1;", buffer))
    {
       // Error already set
       return false;
@@ -1872,51 +1718,56 @@ bool ProjectFileIO::LoadProject(const FilePath &fileName)
          // Error already set
          return false;
       }
-
-      // Missing both the autosave and project docs. This can happen if the
-      // system were to crash before the first autosave into a temporary file.
-      if (buffer.GetDataLen() == 0)
-      {
-         SetError(XO("Unable to load project or autosave documents"));
-         return false;
-      }
    }
 
-   // Decode it while capturing the associated sample blockids
-   project = ProjectSerializer::Decode(buffer, blockids);
-   if (project.empty())
-   {
-      SetError(XO("Unable to decode project document"));
-
-      return false;
-   }
-
-   // Check for orphans blocks...sets mRecovered if any were deleted
-   if (blockids.size() > 0)
-   {
-      if (!CheckForOrphans(blockids))
-      {
-         return false;
-      }
-   }
-
-   XMLFileReader xmlFile;
-
-   // Load 'er up
-   success = xmlFile.ParseString(this, project);
-   if (!success)
-   {
-      SetError(
-         XO("Unable to parse project information.")
-      );
-      mLibraryError = xmlFile.GetErrorStr();
-      return false;
-   }
-
-   // Remember if we used autosave or not
-   if (usedAutosave)
+   // Missing both the autosave and project docs. This can happen if the
+   // system were to crash before the first autosave into a temporary file.
+   // This should be a recoverable scenario.
+   if (buffer.GetDataLen() == 0)
    {
       mRecovered = true;
+   }
+   else
+   {
+      project = ProjectSerializer::Decode(buffer);
+      if (project.empty())
+      {
+         SetError(XO("Unable to decode project document"));
+
+         return false;
+      }
+
+      XMLFileReader xmlFile;
+
+      // Load 'er up
+      success = xmlFile.ParseString(this, project.ToUTF8());
+      if (!success)
+      {
+         SetError(
+            XO("Unable to parse project information."),
+            xmlFile.GetErrorStr()
+         );
+         return false;
+      }
+
+      // Check for orphans blocks...sets mRecovered if any were deleted
+      
+      auto blockids = WaveTrackFactory::Get( mProject )
+         .GetSampleBlockFactory()
+            ->GetActiveBlockIDs();
+      if (blockids.size() > 0)
+      {
+         if (!DeleteBlocks(blockids, true))
+         {
+            return false;
+         }
+      }
+   
+      // Remember if we used autosave or not
+      if (usedAutosave)
+      {
+         mRecovered = true;
+      }
    }
 
    // Mark the project modified if we recovered it
@@ -1940,15 +1791,86 @@ bool ProjectFileIO::LoadProject(const FilePath &fileName)
 
    DiscardConnection();
 
+   success = true;
+
    return true;
 }
 
-bool ProjectFileIO::SaveProject(const FilePath &fileName)
+bool ProjectFileIO::UpdateSaved(const TrackList *tracks)
 {
-   wxString origName;
-   bool wasTemp = false;
-   bool success = false;
-   Connection newConn = nullptr;
+   ProjectSerializer doc;
+   WriteXMLHeader(doc);
+   WriteXML(doc, false, tracks);
+
+   if (!WriteDoc("project", doc))
+   {
+      return false;
+   }
+
+   // Autosave no longer needed
+   if (!AutoSaveDelete())
+   {
+      return false;
+   }
+
+   return true;
+}
+
+// REVIEW: This function is believed to report an error to the user in all cases 
+// of failure.  Callers are believed not to need to do so if they receive 'false'.
+// LLL: All failures checks should now be displaying an error.
+bool ProjectFileIO::SaveProject(
+   const FilePath &fileName, const TrackList *lastSaved)
+{
+   // In the case where we're saving a temporary project to a permanent project,
+   // we'll try to simply rename the project to save a bit of time. We then fall
+   // through to the normal Save (not SaveAs) processing.
+   if (IsTemporary() && mFileName != fileName)
+   {
+      FilePath savedName = mFileName;
+      if (CloseConnection())
+      {
+         bool reopened = false;
+         bool moved = false;
+         if (true == (moved = MoveProject(savedName, fileName)))
+         {
+            if (OpenConnection(fileName))
+               reopened = true;
+            else {
+               MoveProject(fileName, savedName);
+               moved = false; // No longer moved
+
+               reopened = OpenConnection(savedName);
+            }
+         }
+         else {
+            // Rename can fail -- if it's to a different device, requiring
+            // real copy of contents, which might exhaust space
+            reopened = OpenConnection(savedName);
+         }
+
+         // Warning issued in MoveProject()
+         if (reopened && !moved) {
+            return false;
+         }
+
+         if (!reopened) {
+            wxTheApp->CallAfter([this]{
+               ShowErrorDialog(nullptr,
+                  XO("Warning"),
+                  XO(
+"The project's database failed to reopen, "
+"possibly because of limited space on the storage device."),
+                  "Error:_Disk_full_or_not_writable"
+               );
+               wxCommandEvent evt{ EVT_RECONNECTION_FAILURE };
+               mProject.ProcessEvent(evt);
+            });
+
+            return false;
+         }
+      }
+   }
 
    // If we're saving to a different file than the current one, then copy the
    // current to the new file and make it the active file.
@@ -1956,68 +1878,125 @@ bool ProjectFileIO::SaveProject(const FilePath &fileName)
    {
       // Do NOT prune here since we need to retain the Undo history
       // after we switch to the new file.
-      newConn = CopyTo(fileName, XO("Saving project"));
-      if (!newConn)
+      if (!CopyTo(fileName, XO("Saving project"), false))
       {
+         ShowErrorDialog(
+            nullptr,
+            XO("Error Saving Project"),
+            FileException::WriteFailureMessage(fileName),
+            "Error:_Disk_full_or_not_writable"
+            );
          return false;
       }
 
-      // Remember the original project filename and temporary status.
-      origName = mFileName;
-      wasTemp = mTemporary;
+      // Open the newly created database
+      Connection newConn = std::make_unique<DBConnection>(
+         mProject.shared_from_this(), mpErrors,
+         [this]{ OnCheckpointFailure(); });
 
-      // Save the original database connection and try to switch to a new one
-      // (also ensuring closing of one of the connections, with the cooperation
-      // of the finally below)
-      SaveConnection();
-   }
-
-   auto restore = finally([&]
-   {
-      if (!origName.empty())
+      // NOTE: There is a noticeable delay here when dealing with large multi-hour
+      //       projects that we just created. The delay occurs in Open() when it
+      //       calls SafeMode() and is due to the switch from the NONE journal mode
+      //       to the WAL journal mode.
+      //
+      //       So, we do the Open() in a thread and display a progress dialog. Since
+      //       this is currently the only known instance where this occurs, we do the
+      //       threading here. If more instances are identified, then the threading
+      //       should be moved to DBConnection::Open(), wrapping the SafeMode() call
+      //       there.
       {
-         if (success)
+         std::atomic_bool done = {false};
+         bool success = false;
+         auto thread = std::thread([&]
          {
-            // The Save was successful, so now it is safe to abandon the
-            // original connection
-            DiscardConnection();
-         
-            // And also remove the original file if it was a temporary file
-            if (wasTemp)
-            {
-               wxRemoveFile(origName);
-            }
-         }
-         else
-         {
-            // Close the new database and go back to using the original
-            // connection
-            RestoreConnection();
+            success = newConn->Open(fileName);
+            done = true;
+         });
 
-            // And delete the new database
+         // Provides a progress dialog with indeterminate mode
+         wxGenericProgressDialog pd(XO("Syncing").Translation(),
+                                    XO("This may take several seconds").Translation(),
+                                    300000,     // range
+                                    nullptr,    // parent
+                                    wxPD_APP_MODAL | wxPD_ELAPSED_TIME | wxPD_SMOOTH);
+
+         // Wait for the checkpoints to end
+         while (!done)
+         {
+            wxMilliSleep(50);
+            pd.Pulse();
+         }
+         thread.join();
+
+         if (!success)
+         {
+            // Additional help via a Help button links to the manual.
+            ShowErrorDialog(nullptr,
+                           XO("Error Saving Project"),
+                           XO("The project failed to open, possibly due to limited space\n"
+                              "on the storage device.\n\n%s").Format(GetLastError()),
+                           "Error:_Disk_full_or_not_writable");
+
+            newConn = nullptr;
+
+            // Clean up the destination project
             wxRemoveFile(fileName);
+
+            return false;
          }
       }
-   });
 
-   if (!origName.empty())
-   {
+      // Autosave no longer needed in original project file.
+      if (!AutoSaveDelete())
+      {
+         // Additional help via a Help button links to the manual.
+         ShowErrorDialog(nullptr,
+                        XO("Error Saving Project"),
+                        XO("Unable to remove autosave information, possibly due to limited space\n"
+                           "on the storage device.\n\n%s").Format(GetLastError()),
+                        "Error:_Disk_full_or_not_writable");
+
+         newConn = nullptr;
+
+         // Clean up the destination project
+         wxRemoveFile(fileName);
+
+         return false;
+      }
+
+      if (lastSaved) {
+         // Bug2605: Be sure not to save orphan blocks
+         bool recovered = mRecovered;
+         SampleBlockIDSet blockids;
+         InspectBlocks( *lastSaved, {}, &blockids );
+         DeleteBlocks(blockids, true);
+         // Don't set mRecovered if any were deleted
+         mRecovered = recovered;
+      }
+
+      // Try to compact the original project file.
+      auto empty = TrackList::Create(&mProject);
+      Compact( { lastSaved ? lastSaved : empty.get() }, true );
+
+      // Safe to close the original project file now. Not much we can do if this fails,
+      // but we should still be in good shape since we'll be switching to the newly
+      // saved database below.
+      CloseProject();
+
       // And make it the active project file 
       UseConnection(std::move(newConn), fileName);
    }
    else
    {
-      ProjectSerializer doc;
-      WriteXMLHeader(doc);
-      WriteXML(doc);
-
-      if (!WriteDoc("project", doc))
-      {
+      if ( !UpdateSaved( nullptr ) ) {
+         ShowErrorDialog(
+            nullptr,
+            XO("Error Saving Project"),
+            FileException::WriteFailureMessage(fileName),
+            "Error:_Disk_full_or_not_writable"
+            );
          return false;
       }
-
-      // Autosave no longer needed
-      AutoSaveDelete();
    }
 
    // Reaching this point defines success and all the rest are no-fail
@@ -2035,34 +2014,26 @@ bool ProjectFileIO::SaveProject(const FilePath &fileName)
    // Adjust the title
    SetProjectTitle();
 
-   // Tell the finally block to behave
-   success = true;
-
    return true;
 }
 
 bool ProjectFileIO::SaveCopy(const FilePath& fileName)
 {
-   Connection db = CopyTo(fileName, XO("Backing up project"), true);
-   if (!db)
-   {
-      return false;
-   }
+   return CopyTo(fileName, XO("Backing up project"), false, true,
+      {&TrackList::Get(mProject)});
+}
 
-   // All good...close the database
-   db->Close();
-   db = nullptr;
-
-   return true;
+bool ProjectFileIO::OpenProject()
+{
+   return OpenConnection();
 }
 
 bool ProjectFileIO::CloseProject()
 {
-   wxASSERT(mCurrConn != nullptr);
-
-   // Protect...
-   if (mCurrConn == nullptr)
+   auto &currConn = CurrConn();
+   if (!currConn)
    {
+      wxLogDebug("Closing project with no database connection");
       return true;
    }
 
@@ -2075,18 +2046,29 @@ bool ProjectFileIO::CloseProject()
    {
       // If this is a temporary project, we no longer want to keep the
       // project file.
-      if (mTemporary)
+      if (IsTemporary())
       {
          // This is just a safety check.
-         wxFileName temp(FileNames::TempDir());
-         if (temp == wxPathOnly(filename))
-         {
-            wxRemoveFile(filename);
-         }
+         wxFileName temp(TempDirectory::TempDir(), wxT(""));
+         wxFileName file(filename);
+         file.SetFullName(wxT(""));
+         if (file == temp)
+            RemoveProject(filename);
       }
    }
 
    return true;
+}
+
+bool ProjectFileIO::ReopenProject()
+{
+   FilePath fileName = mFileName;
+   if (!CloseConnection())
+   {
+      return false;
+   }
+
+   return OpenConnection(fileName);
 }
 
 bool ProjectFileIO::IsModified() const
@@ -2104,74 +2086,75 @@ bool ProjectFileIO::IsRecovered() const
    return mRecovered;
 }
 
-void ProjectFileIO::Reset()
+wxLongLong ProjectFileIO::GetFreeDiskSpace() const
 {
-   wxASSERT_MSG(mCurrConn == nullptr, wxT("Resetting project with open project file"));
-
-   mModified = false;
-   mRecovered = false;
-
-   SetFileName({});
-}
-
-wxLongLong ProjectFileIO::GetFreeDiskSpace()
-{
-   // make sure it's open and the path is defined
-   auto db = DB();
-
    wxLongLong freeSpace;
    if (wxGetDiskSpace(wxPathOnly(mFileName), NULL, &freeSpace))
    {
+      if (FileNames::IsOnFATFileSystem(mFileName)) {
+         // 4 GiB per-file maximum
+         constexpr auto limit = 1ll << 32;
+
+         // Opening a file only to find its length looks wasteful but
+         // seems to be necessary at least on Windows with FAT filesystems.
+         // I don't know if that is only a wxWidgets bug.
+         auto length = wxFile{mFileName}.Length();
+         // auto length = wxFileName::GetSize(mFileName);
+
+         if (length == wxInvalidSize)
+            length = 0;
+         auto free = std::max<wxLongLong>(0, limit - length);
+         freeSpace = std::min(freeSpace, free);
+      }
       return freeSpace;
    }
 
    return -1;
 }
 
-const TranslatableString & ProjectFileIO::GetLastError() const
+const TranslatableString &ProjectFileIO::GetLastError()
 {
-   return mLastError;
+   return mpErrors->mLastError;
 }
 
-const TranslatableString & ProjectFileIO::GetLibraryError() const
+const TranslatableString &ProjectFileIO::GetLibraryError()
 {
-   return mLibraryError;
+   return mpErrors->mLibraryError;
 }
 
-void ProjectFileIO::SetError(const TranslatableString &msg)
+void ProjectFileIO::SetError(
+   const TranslatableString &msg, const TranslatableString &libraryError )
 {
-   mLastError = msg;
-   mLibraryError = {};
+   auto &currConn = CurrConn();
+   if (currConn)
+      currConn->SetError(msg, libraryError);
 }
 
-void ProjectFileIO::SetDBError(const TranslatableString &msg)
+void ProjectFileIO::SetDBError(
+   const TranslatableString &msg, const TranslatableString &libraryError)
 {
-   mLastError = msg;
-   wxLogDebug(wxT("SQLite error: %s"), mLastError.Debug());
-   printf("   Lib error: %s", mLastError.Debug().mb_str().data());
-
-   if (mCurrConn)
-   {
-      mLibraryError = Verbatim(sqlite3_errmsg(mCurrConn->DB()));
-      wxLogDebug(wxT("   Lib error: %s"), mLibraryError.Debug());
-      printf("   Lib error: %s", mLibraryError.Debug().mb_str().data());
-   }
-   abort();
-   wxASSERT(false);
+   auto &currConn = CurrConn();
+   if (currConn)
+      currConn->SetDBError(msg, libraryError);
 }
 
 void ProjectFileIO::SetBypass()
 {
+   auto &currConn = CurrConn();
+   if (!currConn)
+      return;
+
    // Determine if we can bypass sample block deletes during shutdown.
    //
    // IMPORTANT:
-   // If the project was vacuumed, then we MUST bypass further
+   // If the project was compacted, then we MUST bypass further
    // deletions since the new file doesn't have the blocks that the
    // Sequences expect to be there.
-   mBypass = true;
+
+   currConn->SetBypass( true );
 
    // Only permanent project files need cleaning at shutdown
-   if (!IsTemporary() && !WasVacuumed())
+   if (!IsTemporary() && !WasCompacted())
    {
       // If we still have unused blocks, then we must not bypass deletions
       // during shutdown.  Otherwise, we would have orphaned blocks the next time
@@ -2182,310 +2165,315 @@ void ProjectFileIO::SetBypass()
       // changes.
       if (HadUnused())
       {
-         mBypass = false;
+         currConn->SetBypass( false );
       }
    }
 
    return;
 }
 
-bool ProjectFileIO::ShouldBypass()
+int64_t ProjectFileIO::GetBlockUsage(SampleBlockID blockid)
 {
-   return mBypass;
+   auto pConn = CurrConn().get();
+   if (!pConn)
+      return 0;
+   return GetDiskUsage(*pConn, blockid);
 }
 
-AutoCommitTransaction::AutoCommitTransaction(ProjectFileIO &projectFileIO,
-                                             const char *name)
-:  mIO(projectFileIO),
-   mName(name)
+int64_t ProjectFileIO::GetCurrentUsage(
+   const std::vector<const TrackList*> &trackLists) const
 {
-   mInTrans = mIO.TransactionStart(mName);
-   // Must throw
+   unsigned long long current = 0;
+   const auto fn = BlockSpaceUsageAccumulator(current);
+
+   // Must pass address of this set, even if not otherwise used, to avoid
+   // possible multiple count of shared blocks
+   SampleBlockIDSet seen;
+   for (auto pTracks: trackLists)
+      if (pTracks)
+         InspectBlocks(*pTracks, fn, &seen);
+
+   return current;
 }
 
-AutoCommitTransaction::~AutoCommitTransaction()
+int64_t ProjectFileIO::GetTotalUsage()
 {
-   if (mInTrans)
+   auto pConn = CurrConn().get();
+   if (!pConn)
+      return 0;
+   return GetDiskUsage(*pConn, 0);
+}
+
+//
+// Returns the amount of disk space used by the specified sample blockid or all
+// of the sample blocks if the blockid is 0.  It does this by using the raw SQLite
+// pages available from the "sqlite_dbpage" virtual table to traverse the SQLite
+// table b-tree described here:  https://www.sqlite.org/fileformat.html
+//
+int64_t ProjectFileIO::GetDiskUsage(DBConnection &conn, SampleBlockID blockid /* = 0 */)
+{
+   // Information we need to track our travels through the b-tree
+   typedef struct
    {
-      // Can't check return status...should probably throw an exception here
-      if (!Commit())
-      {
-         // must throw
-      }
-   }
-}
+      int64_t pgno;
+      int currentCell;
+      int numCells;
+      unsigned char data[65536];
+   } page;
+   std::vector<page> stack;
 
-bool AutoCommitTransaction::Commit()
-{
-   wxASSERT(mInTrans);
-
-   mInTrans = !mIO.TransactionCommit(mName);
-
-   return mInTrans;
-}
-
-bool AutoCommitTransaction::Rollback()
-{
-   wxASSERT(mInTrans);
-
-   mInTrans = !mIO.TransactionCommit(mName);
-   
-   return mInTrans;
-}
-
-DBConnection::DBConnection(ProjectFileIO *io)
-:  mIO(*io)
-{
-   mDB = nullptr;
-}
-
-DBConnection::~DBConnection()
-{
-   wxASSERT(mDB == nullptr);
-}
-
-bool DBConnection::Open(const char *fileName)
-{
-   wxASSERT(mDB == nullptr);
+   int64_t total = 0;
+   int64_t found = 0;
+   int64_t right = 0;
    int rc;
 
-   rc = sqlite3_open(fileName, &mDB);
-   if (rc != SQLITE_OK)
+   // Get the rootpage for the sampleblocks table.
+   sqlite3_stmt *stmt =
+      conn.Prepare(DBConnection::GetRootPage,
+                    "SELECT rootpage FROM sqlite_master WHERE tbl_name = 'sampleblocks';");
+   if (stmt == nullptr || sqlite3_step(stmt) != SQLITE_ROW)
    {
-      sqlite3_close(mDB);
-      mDB = nullptr;
-
-      return false;
+      return 0;
    }
 
-   // Set default mode
-   SafeMode();
+   // And store it in our first stack frame
+   stack.push_back({sqlite3_column_int64(stmt, 0)});
 
-   // Kick off the checkpoint thread
-   mCheckpointStop = false;
-   mCheckpointWaitingPages = 0;
-   mCheckpointCurrentPages = 0;
-   mCheckpointThread = std::thread([this]{ CheckpointThread(); });
+   // All done with the statement
+   sqlite3_clear_bindings(stmt);
+   sqlite3_reset(stmt);
 
-   // Install our checkpoint hook
-   sqlite3_wal_hook(mDB, CheckpointHook, this);
-
-   return mDB;
-}
-
-bool DBConnection::Close()
-{
-   wxASSERT(mDB != nullptr);
-   int rc;
-
-   // Protect...
-   if (mDB == nullptr)
+   // Prepare/retrieve statement to read raw database page
+   stmt = conn.Prepare(DBConnection::GetDBPage,
+      "SELECT data FROM sqlite_dbpage WHERE pgno = ?1;");
+   if (stmt == nullptr)
    {
-      return true;
+      return 0;
    }
 
-   // Uninstall our checkpoint hook so that no additional checkpoints
-   // are sent our way.  (Though this shouldn't really happen.)
-   sqlite3_wal_hook(mDB, nullptr, nullptr);
-
-   // Display a progress dialog if there's active or pending checkpoints
-   if (mCheckpointWaitingPages || mCheckpointCurrentPages)
+   // Traverse the b-tree until we've visited all of the leaf pages or until
+   // we find the one corresponding to the passed in sample blockid. Because we
+   // use an integer primary key for the sampleblocks table, the traversal will
+   // be in ascending blockid sequence.
+   do
    {
-      TranslatableString title = XO("Checkpointing project");
+      // Acces the top stack frame
+      page &pg = stack.back();
 
-      // Get access to the active project
-      auto project = mIO.mpProject.lock();
-      if (project)
+      // Read the page from the sqlite_dbpage table if it hasn't yet been loaded
+      if (pg.numCells == 0)
       {
-         title = XO("Checkpointing %s").Format(project->GetProjectName());
-      }
+         // Bind the page number
+         sqlite3_bind_int64(stmt, 1, pg.pgno);
 
-      // Provides a progress dialog with indeterminate mode
-      wxGenericProgressDialog pd(title.Translation(),
-                                 XO("This may take several seconds").Translation(),
-                                 300000,     // range
-                                 nullptr,    // parent
-                                 wxPD_APP_MODAL | wxPD_ELAPSED_TIME | wxPD_SMOOTH);
-
-      // Wait for the checkpoints to end
-      while (mCheckpointWaitingPages || mCheckpointCurrentPages)
-      {
-         wxMilliSleep(50);
-         pd.Pulse();
-      }
-   }
-
-   // Tell the checkpoint thread to shutdown
-   {
-      std::lock_guard<std::mutex> guard(mCheckpointMutex);
-      mCheckpointStop = true;
-      mCheckpointCondition.notify_one();
-   }
-
-   // And wait for it to do so
-   mCheckpointThread.join();
-
-   // We're done with the prepared statements
-   for (auto stmt : mStatements)
-   {
-      sqlite3_finalize(stmt.second);
-   }
-   mStatements.clear();
-
-   // Close the DB
-   rc = sqlite3_close(mDB);
-   if (rc != SQLITE_OK)
-   {
-      // I guess we could try to recover by repreparing statements and reinstalling
-      // the hook, but who knows if that would work either.
-      //
-      // Should we throw an error???
-   }
-
-   mDB = nullptr;
-
-   return true;
-}
-
-bool DBConnection::SafeMode(const char *schema /* = "main" */)
-{
-   return ModeConfig(mDB, schema, SafeConfig);
-}
-
-bool DBConnection::FastMode(const char *schema /* = "main" */)
-{
-   return ModeConfig(mDB, schema, FastConfig);
-}
-
-bool DBConnection::ModeConfig(sqlite3 *db, const char *schema, const char *config)
-{
-   // Ensure attached DB connection gets configured
-   int rc;
-
-   // Replace all schema "keywords" with the schema name
-   wxString sql = config;
-   sql.Replace(wxT("<schema>"), schema);
-
-   // Set the configuration
-   rc = sqlite3_exec(db, sql, nullptr, nullptr, nullptr);
-
-   return rc != SQLITE_OK;
-}
-
-sqlite3 *DBConnection::DB()
-{
-   wxASSERT(mDB != nullptr);
-
-   return mDB;
-}
-
-int DBConnection::GetLastRC() const
-{
-   return sqlite3_errcode(mDB);
-}
-
-const wxString DBConnection::GetLastMessage() const
-{
-   return sqlite3_errmsg(mDB);
-}
-
-sqlite3_stmt *DBConnection::Prepare(enum StatementID id, const char *sql)
-{
-   int rc;
-
-   // Return an existing statement if it's already been prepared
-   auto iter = mStatements.find(id);
-   if (iter != mStatements.end())
-   {
-      return iter->second;
-   }
-
-   // Prepare the statement
-   sqlite3_stmt *stmt = nullptr;
-   rc = sqlite3_prepare_v3(mDB, sql, -1, SQLITE_PREPARE_PERSISTENT, &stmt, 0);
-   if (rc != SQLITE_OK)
-   {
-      wxLogDebug("prepare error %s", sqlite3_errmsg(mDB));
-      THROW_INCONSISTENCY_EXCEPTION;
-   }
-
-   // And remember it
-   mStatements.insert({id, stmt});
-
-   return stmt;
-}
-
-sqlite3_stmt *DBConnection::GetStatement(enum StatementID id)
-{
-   // Look it up
-   auto iter = mStatements.find(id);
-
-   // It should always be there
-   wxASSERT(iter != mStatements.end());
-
-   // Return it
-   return iter->second;
-}
-
-void DBConnection::CheckpointThread()
-{
-   // Open another connection to the DB to prevent blocking the main thread.
-   //
-   // If it fails, then we won't checkpoint until the main thread closes
-   // the associated DB.
-   sqlite3 *db = nullptr;
-   if (sqlite3_open(sqlite3_db_filename(mDB, nullptr), &db) == SQLITE_OK)
-   {
-      // Configure it to be safe
-      ModeConfig(db, "main", SafeConfig);
-
-      while (true)
-      {
+         // And retrieve the page
+         if (sqlite3_step(stmt) != SQLITE_ROW)
          {
-            // Wait for work or the stop signal
-            std::unique_lock<std::mutex> lock(mCheckpointMutex);
-            mCheckpointCondition.wait(lock,
-                                      [&]
-                                      {
-                                          return mCheckpointWaitingPages || mCheckpointStop;
-                                      });
-
-            // Requested to stop, so bail
-            if (mCheckpointStop)
-            {
-               break;
-            }
-
-            // Capture the number of pages that need checkpointing and reset
-            mCheckpointCurrentPages.store( mCheckpointWaitingPages );
-            mCheckpointWaitingPages = 0;
+            // REVIEW: Likely harmless failure - says size is zero on
+            // this error.
+            // LLL: Yea, but not much else we can do.
+            return 0;
          }
 
-         // And kick off the checkpoint. This may not checkpoint ALL frames
-         // in the WAL.  They'll be gotten the next time around.
-         sqlite3_wal_checkpoint_v2(db, nullptr, SQLITE_CHECKPOINT_PASSIVE, nullptr, nullptr);
+         // Copy the page content to the stack frame
+         memcpy(&pg.data,
+                sqlite3_column_blob(stmt, 0),
+                sqlite3_column_bytes(stmt, 0));
 
-         // Reset
-         mCheckpointCurrentPages = 0;
+         // And retrieve the total number of cells within it
+         pg.numCells = get2(&pg.data[3]);
+
+         // Reset statement for next usage
+         sqlite3_clear_bindings(stmt);
+         sqlite3_reset(stmt);
+      }
+
+      //wxLogDebug("%*.*spgno %lld currentCell %d numCells %d", (stack.size() - 1) * 2, (stack.size() - 1) * 2, "", pg.pgno, pg.currentCell, pg.numCells);
+
+      // Process an interior table b-tree page
+      if (pg.data[0] == 0x05)
+      {
+         // Process the next cell if we haven't examined all of them yet
+         if (pg.currentCell < pg.numCells)
+         {
+            // Remember the right-most leaf page number.
+            right = get4(&pg.data[8]);
+
+            // Iterate over the cells.
+            //
+            // If we're not looking for a specific blockid, then we always push the
+            // target page onto the stack and leave the loop after a single iteration.
+            //
+            // Otherwise, we match the blockid against the highest integer key contained
+            // within the cell and if the blockid falls within the cell, we stack the
+            // page and stop the iteration.
+            //
+            // In theory, we could do a binary search for a specific blockid here, but
+            // because our sample blocks are always large, we will get very few cells
+            // per page...usually 6 or less.
+            //
+            // In both cases, the stacked page can be either an internal or leaf page.
+            bool stacked = false;
+            while (pg.currentCell < pg.numCells)
+            {
+               // Get the offset to this cell using the offset in the cell pointer
+               // array.
+               //
+               // The cell pointer array starts immediately after the page header
+               // at offset 12 and the retrieved offset is from the beginning of
+               // the page.
+               int celloff = get2(&pg.data[12 + (pg.currentCell * 2)]);
+
+               // Bump to the next cell for the next iteration.
+               pg.currentCell++;
+
+               // Get the page number this cell describes
+               int pagenum = get4(&pg.data[celloff]);
+
+               // And the highest integer key, which starts at offset 4 within the cell.
+               int64_t intkey = 0;
+               get_varint(&pg.data[celloff + 4], &intkey);
+
+               //wxLogDebug("%*.*sinternal - right %lld celloff %d pagenum %d intkey %lld", (stack.size() - 1) * 2, (stack.size() - 1) * 2, " ", right, celloff, pagenum, intkey);
+
+               // Stack the described page if we're not looking for a specific blockid
+               // or if this page contains the given blockid.
+               if (!blockid || blockid <= intkey)
+               {
+                  stack.push_back({pagenum, 0, 0});
+                  stacked = true;
+                  break;
+               }
+            }
+
+            // If we pushed a new page onto the stack, we need to jump back up
+            // to read the page
+            if (stacked)
+            {
+               continue;
+            }
+         }
+
+         // We've exhausted all the cells with this page, so we stack the right-most
+         // leaf page.  Ensure we only process it once.
+         if (right)
+         {
+            stack.push_back({right, 0, 0});
+            right = 0;
+            continue;
+         }
+      }
+      // Process a leaf table b-tree page
+      else if (pg.data[0] == 0x0d)
+      {
+         // Iterate over the cells
+         //
+         // If we're not looking for a specific blockid, then just accumulate the
+         // payload sizes. We will be reading every leaf page in the sampleblocks
+         // table.
+         //
+         // Otherwise we break out when we find the matching blockid. In this case,
+         // we only ever look at 1 leaf page.
+         bool stop = false;
+         for (int i = 0; i < pg.numCells; i++)
+         {
+            // Get the offset to this cell using the offset in the cell pointer
+            // array.
+            //
+            // The cell pointer array starts immediately after the page header
+            // at offset 8 and the retrieved offset is from the beginning of
+            // the page.
+            int celloff = get2(&pg.data[8 + (i * 2)]);
+
+            // Get the total payload size in bytes of the described row.
+            int64_t payload = 0;
+            int digits = get_varint(&pg.data[celloff], &payload);
+
+            // Get the integer key for this row.
+            int64_t intkey = 0;
+            get_varint(&pg.data[celloff + digits], &intkey);
+
+            //wxLogDebug("%*.*sleaf - celloff %4d intkey %lld payload %lld", (stack.size() - 1) * 2, (stack.size() - 1) * 2, " ", celloff, intkey, payload);
+
+            // Add this payload size to the total if we're not looking for a specific
+            // blockid
+            if (!blockid)
+            {
+               total += payload;
+            }
+            // Otherwise, return the payload size for a matching row
+            else if (blockid == intkey)
+            {
+               return payload;
+            }
+         }
+      }
+
+      // Done with the current branch, so pop back up to the previous one (if any)
+      stack.pop_back();
+   } while (!stack.empty());
+
+   // Return the total used for all sample blocks
+   return total;
+}
+
+// Retrieves a 2-byte big-endian integer from the page data
+unsigned int ProjectFileIO::get2(const unsigned char *ptr)
+{
+   return (ptr[0] << 8) | ptr[1];
+}
+
+// Retrieves a 4-byte big-endian integer from the page data
+unsigned int ProjectFileIO::get4(const unsigned char *ptr)
+{
+   return ((unsigned int) ptr[0] << 24) |
+          ((unsigned int) ptr[1] << 16) |
+          ((unsigned int) ptr[2] << 8)  |
+          ((unsigned int) ptr[3]);
+}
+
+// Retrieves a variable length integer from the page data. Returns the
+// number of digits used to encode the integer and the stores the
+// value at the given location.
+int ProjectFileIO::get_varint(const unsigned char *ptr, int64_t *out)
+{
+   int64_t val = 0;
+   int i;
+
+   for (i = 0; i < 8; ++i)
+   {
+      val = (val << 7) + (ptr[i] & 0x7f);
+      if ((ptr[i] & 0x80) == 0)
+      {
+         *out = val;
+         return i + 1;
       }
    }
 
-   // All done (always close)
-   sqlite3_close(db);
+   val = (val << 8) + (ptr[i] & 0xff);
+   *out = val;
 
-   return;
+   return 9;
 }
 
-int DBConnection::CheckpointHook(void *data, sqlite3 *db, const char *schema, int pages)
+InvisibleTemporaryProject::InvisibleTemporaryProject()
+   : mpProject{ std::make_shared< AudacityProject >() }
 {
-   // Get access to our object
-   DBConnection *that = static_cast<DBConnection *>(data);
-
-   // Queue the database pointer for our checkpoint thread to process
-   std::lock_guard<std::mutex> guard(that->mCheckpointMutex);
-   that->mCheckpointWaitingPages = pages;
-   that->mCheckpointCondition.notify_one();
-
-   return SQLITE_OK;
 }
 
+InvisibleTemporaryProject::~InvisibleTemporaryProject()
+{
+   auto &projectFileIO = ProjectFileIO::Get( Project() );
+   projectFileIO.SetBypass();
+   auto &tracks = TrackList::Get( Project() );
+   tracks.Clear();
+
+   // Consume some delayed track list related events before destroying the
+   // temporary project
+   try { wxTheApp->Yield(); } catch(...) {}
+
+   // Destroy the project and yield again to let delayed window deletions happen
+   projectFileIO.CloseProject();
+   mpProject.reset();
+   try { wxTheApp->Yield(); } catch(...) {}
+}
