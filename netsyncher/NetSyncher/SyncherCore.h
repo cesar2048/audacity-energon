@@ -9,6 +9,7 @@ public:
 	~SyncherCore();
 
 	void OnRecord();
+	void OnStop();
 	void OnStartServer();
 	bool isRecording();
 

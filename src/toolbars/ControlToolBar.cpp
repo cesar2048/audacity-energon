@@ -75,6 +75,8 @@
 #include "../tracks/ui/Scrubbing.h"
 #include "../toolbars/ToolManager.h"
 
+#include "../netsyncher/NetSyncher/SyncherCore.h"
+
 IMPLEMENT_CLASS(ControlToolBar, ToolBar);
 
 ////////////////////////////////////////////////////////////
@@ -117,6 +119,7 @@ ControlToolBar::ControlToolBar( AudacityProject &project )
    mStrLocale = gPrefs->Read(wxT("/Locale/Language"), wxT(""));
 
    mSizer = NULL;
+   mSynch = new SyncherCore(this);
 }
 
 ControlToolBar::~ControlToolBar()
@@ -584,6 +587,7 @@ void ControlToolBar::OnStop(wxCommandEvent & WXUNUSED(evt))
 
    if ( canStop ) {
       projectAudioManager.Stop();
+	  mSynch->OnStop();
    }
 }
 
@@ -606,12 +610,13 @@ void ControlToolBar::OnRecord(wxCommandEvent &evt)
 
    bool altAppearance = mRecord->WasShiftDown();
    ProjectAudioManager::Get( mProject ).OnRecord( altAppearance );
+
+   mSynch->OnRecord();
 }
 
 void ControlToolBar::OnRecordSync(wxCommandEvent &evt)
 {
-	// bool altAppearance = mRecord->WasShiftDown();
-	ProjectAudioManager::Get(mProject).OnRecordSync(false);
+	mSynch->OnStartServer();
 }
 
 void ControlToolBar::OnPause(wxCommandEvent & WXUNUSED(evt))

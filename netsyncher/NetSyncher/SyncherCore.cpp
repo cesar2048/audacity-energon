@@ -28,11 +28,16 @@ void SyncherCore::OnRecord()
 {
 	if (!this->recording) {
 		this->ns->StartRecording();
+		this->recording = true;
 	}
-	else {
+}
+
+void SyncherCore::OnStop()
+{
+	if (this->recording) {
 		this->ns->StopRecording();
+		this->recording = false;
 	}
-	this->recording = !this->recording;
 }
 
 void SyncherCore::OnStartServer() {
@@ -47,7 +52,8 @@ void SyncherCore::OnStartServer() {
 
 	vector<string> addresses = FindOSInterfaces(4);
 	JsonConnectInfo info(addresses);
-	const char* addressData = info.toJsonString().c_str();
+	string addressString = info.toJsonString();
+	const char* addressData = addressString.c_str();
 
 	ConnectionWindow* conectionWindow = new ConnectionWindow(this->parent, "Connection", wxPoint(100, 100), wxSize(450, 340), addressData);
 	conectionWindow->Show();
