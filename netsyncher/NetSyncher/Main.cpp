@@ -93,12 +93,13 @@ void MyFrame::OnAbout(wxCommandEvent& event) {
 
 void MyFrame::OnRecord(wxCommandEvent & event)
 {
-	this->core->OnRecord();
 	if (this->core->isRecording()) {
-		this->btnRecord->SetLabel("Stop");
+		this->core->OnStop();
+		this->btnRecord->SetLabel("Record");
 	}
 	else {
-		this->btnRecord->SetLabel("Record");
+		this->core->OnRecord();
+		this->btnRecord->SetLabel("Stop");
 	}
 }
 
