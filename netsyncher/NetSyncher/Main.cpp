@@ -2,7 +2,7 @@
 //
 
 #include <iostream>
-#include "SyncherCore.h"
+#include "EnergonConnectionApp.h"
 // ------------ MyApp ---------------------
 
 class MyApp : public wxApp {
@@ -22,7 +22,7 @@ class MyFrame : public wxFrame {
 	public:
 		MyFrame(const wxString& title, const wxPoint& pos, const wxSize& size);
 	private:
-		SyncherCore *core;
+		EnergonConnectionApp *core;
 		wxButton *btnRecord;
 
 		void OnStartServer(wxCommandEvent& event);
@@ -54,7 +54,7 @@ bool MyApp::OnInit() {
 MyFrame::MyFrame(const wxString& title, const wxPoint& pos, const wxSize& size)
 	: wxFrame(NULL, wxID_ANY, title, pos, size)
 {
-	this->core = new SyncherCore(this);
+	this->core = new EnergonConnectionApp(this);
 
 	{ // menu block
 		wxMenu *menuFile = new wxMenu;
@@ -104,6 +104,6 @@ void MyFrame::OnRecord(wxCommandEvent & event)
 }
 
 void MyFrame::OnStartServer(wxCommandEvent& event) {
-	this->core->OnStartServer();
+	this->core->startServer();
 };
 

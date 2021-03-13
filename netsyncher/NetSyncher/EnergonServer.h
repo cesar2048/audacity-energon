@@ -8,15 +8,22 @@
 #include <map>
 
 #include "WebsocketProtocol.h"
-#include "WebApp.h"
+#include "EnergonServer.h"
 #include "NetSyncher.h"
 
 using namespace std; 
 
-class WebApp : public HttpServer::IRouteHandler, public IWebsocketApp
+class IEnergonSubscriber {
+public:
+	virtual void onClientConnected() = 0;
+};
+
+class EnergonServer : public HttpServer::IRouteHandler, public IWebsocketApp
 {
 	NetSynch::NetSyncher* syncher;
+	IEnergonSubscriber* subscriber;
 
+	// httpServer operation
 	shared_ptr<HttpResponseMsg> post_upload(HttpRequestMsg* req);
 	shared_ptr<HttpResponseMsg> get(HttpRequestMsg* req);
 	shared_ptr<HttpResponseMsg> not_found(HttpRequestMsg* req);
@@ -30,5 +37,8 @@ class WebApp : public HttpServer::IRouteHandler, public IWebsocketApp
 	virtual void onClose(WebSocketBase * conn) override;
 
 public:
-	WebApp(NetSynch::NetSyncher* syncher);
+	EnergonServer(NetSynch::NetSyncher* syncher);
+
+	void setSubscriber(IEnergonSubscriber* subscriber);
 };
+

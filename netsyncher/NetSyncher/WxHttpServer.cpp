@@ -5,7 +5,7 @@
 #include <wx/wxprec.h>
 
 #include "HttpProtocol.h"
-#include "WebApp.h"
+#include "EnergonServer.h"
 
 
 // ------------ Http server WX implementations ---------------------
@@ -52,7 +52,7 @@ public:
 		return bytesRead;
 	}
 
-	// Heredado vía InputStream
+	// Heredado vï¿½a InputStream
 	virtual uint32_t read(uint8_t * buffer, uint32_t len) override
 	{
 		socket.SetTimeout(5);
@@ -62,7 +62,7 @@ public:
 		return read;
 	}
 
-	// Heredado vía IOStream
+	// Heredado vï¿½a IOStream
 	virtual uint32_t write(uint8_t * buffer, uint32_t len) override
 	{
 		DebugLog("WxIOStream::write() %i bytes\n", len);
@@ -70,13 +70,13 @@ public:
 		return this->socket.LastWriteCount();
 	}
 
-	// Inherited vía IOStream
+	// Inherited vï¿½a IOStream
 	virtual void close() override
 	{
 		/// do nothing here
 	}
 
-	// Inherited vía IOStream
+	// Inherited vï¿½a IOStream
 	virtual bool isconnected() override
 	{
 		return this->socket.IsConnected();
@@ -95,7 +95,7 @@ class WxNetwork : public HttpServer::INetwork {
 	bool alive;
 
 public:
-	// Heredado vía INetwork
+	// Heredado vï¿½a INetwork
 	virtual void Listen(int port) override
 	{
 		this->alive = true;
@@ -108,7 +108,7 @@ public:
 		this->server = new wxSocketServer(addr, wxSOCKET_NONE);
 	}
 
-	// Heredado vía INetwork
+	// Heredado vï¿½a INetwork
 	virtual shared_ptr<IOStream> Accept() override
 	{
 		WxIOStream* stream = new WxIOStream();
@@ -127,7 +127,7 @@ public:
 		return result;
 	}
 
-	// Heredado vía INetwork
+	// Heredado vï¿½a INetwork
 	virtual void Close() override
 	{
 		this->alive = false;

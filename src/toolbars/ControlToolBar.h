@@ -27,7 +27,7 @@ class wxStatusBar;
 
 class AButton;
 class AudacityProject;
-class SyncherCore;
+class EnergonConnectionApp;
 
 // In the GUI, ControlToolBar appears as the "Transport Toolbar". "Control Toolbar" is historic.
 class ControlToolBar final : public ToolBar {
@@ -128,7 +128,7 @@ class ControlToolBar final : public ToolBar {
 
    wxBoxSizer *mSizer;
 
-   SyncherCore* mSynch;
+   EnergonConnectionApp* mSynch;
 
  public:
 

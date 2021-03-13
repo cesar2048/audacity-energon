@@ -429,6 +429,7 @@ std::shared_ptr<MemBuffer> readUntilPosition(IOStream* iostream, const std::func
 			readBytes = endFoundHere;
 		}
 
+		DebugLog("readUntilPosition.readBytes = %i\n", readBytes);
 		iostream->read(buffer, readBytes); // advance stream
 		outBuffer->write(buffer, readBytes); // save to memory
 	}

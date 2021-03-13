@@ -75,7 +75,7 @@
 #include "../tracks/ui/Scrubbing.h"
 #include "../toolbars/ToolManager.h"
 
-#include "../netsyncher/NetSyncher/SyncherCore.h"
+#include "../netsyncher/NetSyncher/EnergonConnectionApp.h"
 
 IMPLEMENT_CLASS(ControlToolBar, ToolBar);
 
@@ -119,7 +119,7 @@ ControlToolBar::ControlToolBar( AudacityProject &project )
    mStrLocale = gPrefs->Read(wxT("/Locale/Language"), wxT(""));
 
    mSizer = NULL;
-   mSynch = new SyncherCore(this);
+   mSynch = new EnergonConnectionApp(this);
 }
 
 ControlToolBar::~ControlToolBar()
@@ -616,7 +616,7 @@ void ControlToolBar::OnRecord(wxCommandEvent &evt)
 
 void ControlToolBar::OnRecordSync(wxCommandEvent &evt)
 {
-	mSynch->OnStartServer();
+	mSynch->startServer();
 }
 
 void ControlToolBar::OnPause(wxCommandEvent & WXUNUSED(evt))

@@ -175,8 +175,8 @@
     <ClCompile Include="NetSyncher.cpp" />
     <ClCompile Include="osInterface.cpp" />
     <ClCompile Include="sha1.c" />
-    <ClCompile Include="SyncherCore.cpp" />
-    <ClCompile Include="WebApp.cpp" />
+    <ClCompile Include="EnergonConnectionApp.cpp" />
+    <ClCompile Include="EnergonServer.cpp" />
     <ClCompile Include="WebsocketProtocol.cpp" />
     <ClCompile Include="WxHttpServer.cpp" />
   </ItemGroup>
@@ -191,8 +191,8 @@
     <ClInclude Include="osinterface.h" />
     <ClInclude Include="sha1.h" />
     <ClInclude Include="stringextension.h" />
-    <ClInclude Include="SyncherCore.h" />
-    <ClInclude Include="WebApp.h" />
+    <ClInclude Include="EnergonConnectionApp.h" />
+    <ClInclude Include="EnergonServer.h" />
     <ClInclude Include="WebsocketProtocol.h" />
     <ClInclude Include="WxHttpServer.h" />
   </ItemGroup>

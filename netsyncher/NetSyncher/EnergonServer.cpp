@@ -1,4 +1,4 @@
-#include "WebApp.h"
+#include "EnergonServer.h"
 #include "NetSyncher.h"
 
 class ClientObject : public NetSynch::IClientDevice {
@@ -25,32 +25,42 @@ public:
 
 // ------------ WebApplication ---------------------
 
-WebApp::WebApp(NetSynch::NetSyncher * syncher)
-	:syncher(syncher)
+EnergonServer::EnergonServer(NetSynch::NetSyncher * syncher)
+	: syncher(syncher),
+	  subscriber(NULL)
 {
 }
 
-void WebApp::onOpen(WebSocketBase * conn)
+void EnergonServer::setSubscriber(IEnergonSubscriber * subscriber)
+{
+	this->subscriber = subscriber;
+}
+
+void EnergonServer::onOpen(WebSocketBase * conn)
 {
 	shared_ptr<ClientObject> client(new ClientObject(conn));
 	this->syncher->acceptClient(client);
 	DebugLog("WS: opened connection\n");
+
+	if (this->subscriber != NULL) {
+		this->subscriber->onClientConnected();
+	}
 }
 
-void WebApp::onMessage(WebSocketBase * conn, string message)
+void EnergonServer::onMessage(WebSocketBase * conn, string message)
 {
 	// nothing to do here
 	DebugLog("WS: onmessage: %s\n", message.c_str());
 }
 
-void WebApp::onClose(WebSocketBase * conn)
+void EnergonServer::onClose(WebSocketBase * conn)
 {
 	// also, nothing to do here
 	DebugLog("WS: closed connection\n");
 }
 
 
-shared_ptr<HttpResponseMsg> WebApp::post_upload(HttpRequestMsg * req)
+shared_ptr<HttpResponseMsg> EnergonServer::post_upload(HttpRequestMsg * req)
 {
 	char tempLine[2048];
 	shared_ptr<MultipartStream> file = req->readFile("filename");
@@ -78,7 +88,7 @@ shared_ptr<HttpResponseMsg> WebApp::post_upload(HttpRequestMsg * req)
 	return res;
 }
 
-shared_ptr<HttpResponseMsg> WebApp::get(HttpRequestMsg * req)
+shared_ptr<HttpResponseMsg> EnergonServer::get(HttpRequestMsg * req)
 {
 	char tempLine[2048];
 	auto res = HttpServer::createResponse();
@@ -89,7 +99,7 @@ shared_ptr<HttpResponseMsg> WebApp::get(HttpRequestMsg * req)
 	return res;
 }
 
-shared_ptr<HttpResponseMsg> WebApp::not_found(HttpRequestMsg * req)
+shared_ptr<HttpResponseMsg> EnergonServer::not_found(HttpRequestMsg * req)
 {
 	auto res = HttpServer::createResponse();
 	res->setStatus(404);
@@ -97,7 +107,7 @@ shared_ptr<HttpResponseMsg> WebApp::not_found(HttpRequestMsg * req)
 	return res;
 }
 
-shared_ptr<HttpResponseMsg> WebApp::OnRequest(HttpRequestMsg* req)
+shared_ptr<HttpResponseMsg> EnergonServer::OnRequest(HttpRequestMsg* req)
 {
 	const string uri = req->getUrl();
 	const string method = req->getMethod();
